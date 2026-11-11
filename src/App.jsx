@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   Search, LayoutDashboard, BarChart2, MessageSquare, Database,
-  Calendar, Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight
+  Calendar, Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, X, AlertTriangle, CheckCircle2, ServerCrash
 } from 'lucide-react';
 
 export default function App() {
@@ -12,11 +12,14 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
+  // State untuk Bot & Notifikasi Laporan
+  const [isBotRunning, setIsBotRunning] = useState(false);
+  const [botReport, setBotReport] = useState(null); 
+
   const [filterBulan, setFilterBulan] = useState('Semua');
   const [filterAkun, setFilterAkun] = useState('Semua');
   const [filterFyp, setFilterFyp] = useState('Semua');
 
-  // STATE BARU: Untuk Pagination (Halaman)
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -37,27 +40,22 @@ export default function App() {
     if (filterValue === 'Semua') return true;
     const s = (status || "").toLowerCase();
     const isAnyFyp = (s.includes('fyp') || s.includes('viral')) && !s.includes('belum');
-
     if (filterValue === 'Semua FYP') return isAnyFyp;
     if (filterValue === 'Belum FYP') return !isAnyFyp;
-    
     if (filterValue === 'Super Viral') return s.includes('super viral');
     if (filterValue === 'Mega FYP') return s.includes('mega fyp');
     if (filterValue === 'Berkelanjutan') return s.includes('berkelanjutan');
     if (filterValue === 'FYP Awal') return isAnyFyp && !s.includes('super viral') && !s.includes('mega fyp') && !s.includes('berkelanjutan');
-
     return true;
   };
 
   const getFypBadgeStyle = (status) => {
     if (!status) return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
     const s = status.toLowerCase();
-    
     if (s.includes('super viral')) return { bg: 'bg-purple-100', text: 'text-purple-800', border: 'border-purple-300', icon: <Rocket className="w-4 h-4" /> };
     if (s.includes('mega fyp')) return { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-300', icon: <Flame className="w-4 h-4" /> };
     if (s.includes('berkelanjutan')) return { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-300', icon: <TrendingUp className="w-4 h-4" /> };
     if (s.includes('fyp') && !s.includes('belum')) return { bg: 'bg-amber-100', text: 'text-amber-700', border: 'border-amber-300', icon: <Zap className="w-4 h-4" /> };
-    
     return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
   };
 
@@ -68,10 +66,7 @@ export default function App() {
       const result = await response.json();
       if (result.status === "success") {
         const validData = result.data.filter(item => 
-          item.Link_Postingan && 
-          item.Link_Postingan.includes("tiktok.com") && 
-          item.Induk_Barang && 
-          item.Induk_Barang.trim() !== ""
+          item.Link_Postingan && item.Link_Postingan.includes("tiktok.com") && item.Induk_Barang && item.Induk_Barang.trim() !== ""
         );
         setData(validData.reverse());
       }
@@ -81,14 +76,28 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // FUNGSI EKSEKUSI BOT & MENANGKAP LAPORAN
+  const runBotScraper = async () => {
+    setIsBotRunning(true);
+    try {
+      const response = await fetch(`${API_URL}?action=run_update`);
+      const result = await response.json();
+      
+      if (result.status === "success") {
+        // Tampilkan Modal Laporan dari Apps Script
+        setBotReport(result.report); 
+        fetchData(); // Update data di tabel dengan angka terbaru
+      } else {
+        alert("Gagal menjalankan bot: " + result.message);
+      }
+    } catch (err) {
+      alert("Koneksi terputus. Pastikan Apps Script berjalan dengan baik.");
+    }
+    setIsBotRunning(false);
+  };
 
-  // EFEK BARU: Kembalikan ke Halaman 1 setiap kali Filter diubah
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [filterBulan, filterAkun, filterFyp]);
+  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
 
   const listBulan = ['Semua', ...new Set(data.map(item => getBulanFormat(item.Tanggal_Upload)).filter(b => b !== 'Tanpa Tanggal' && b !== 'Format Tidak Dikenal'))];
   const listAkun = ['Semua', ...new Set(data.map(item => item.Nama_Akun || item.Id_Akun).filter(Boolean))];
@@ -107,15 +116,72 @@ export default function App() {
     return (s.includes('fyp') || s.includes('viral')) && !s.includes('belum');
   }).length;
 
-  // LOGIKA PAGINATION: Memotong data untuk halaman yang sedang aktif
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12">
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative">
       
+      {/* --- POP-UP MODAL LAPORAN BOT --- */}
+      {botReport && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            {/* Header Modal */}
+            <div className={`px-6 py-4 flex items-center gap-3 ${botReport.apiHabis ? 'bg-red-50' : botReport.terpotongWaktu ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+              {botReport.apiHabis ? <ServerCrash className="w-6 h-6 text-red-600" /> : 
+               botReport.terpotongWaktu ? <AlertTriangle className="w-6 h-6 text-amber-600" /> : 
+               <CheckCircle2 className="w-6 h-6 text-emerald-600" />}
+              <h3 className="font-bold text-lg text-gray-900">
+                {botReport.apiHabis ? 'Kuota API Rapid Habis!' : botReport.terpotongWaktu ? 'Pengecekan Dijeda (Time Limit)' : 'Pengecekan Selesai'}
+              </h3>
+            </div>
+            
+            {/* Isi Modal */}
+            <div className="p-6">
+              <p className="text-gray-600 text-sm mb-6 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">
+                "{botReport.pesan}"
+              </p>
+              
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+                  <span className="text-gray-500 text-sm font-semibold">Video Dianalisa di Data_View:</span>
+                  <span className="font-bold text-gray-900">{botReport.videoTerdeteksi} baris</span>
+                </div>
+                <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+                  <span className="text-gray-500 text-sm font-semibold">Penggunaan Kuota RapidAPI Sesi ini:</span>
+                  <span className={`font-bold px-3 py-1 rounded-md text-sm ${botReport.apiHabis ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
+                    {botReport.apiTerpakai} request
+                  </span>
+                </div>
+                {botReport.apiHabis && (
+                  <div className="bg-red-50 text-red-700 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 mt-2 border border-red-200">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>Peringatan: Seluruh 8 kunci API cadangan Anda telah mencapai limit. Proses bot dihentikan otomatis. Silakan coba lagi besok saat kuota di-reset.</span>
+                  </div>
+                )}
+                {botReport.terpotongWaktu && (
+                  <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 mt-2 border border-amber-200">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>Peringatan: Bot dihentikan di menit ke 4.5 agar Google tidak memberikan Error. Masih ada sisa video yang belum tercek, Anda bisa mengklik tombol 'Jalankan Bot' lagi untuk melanjutkannya.</span>
+                  </div>
+                )}
+              </div>
+
+              <button 
+                onClick={() => setBotReport(null)}
+                className="w-full mt-6 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 rounded-xl transition-colors shadow-md"
+              >
+                Tutup Laporan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* --- AKHIR MODAL --- */}
+
+
       {/* HEADER NAVIGASI */}
       <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-30 shadow-sm">
         <div className="flex items-center gap-3 w-1/4">
@@ -149,61 +215,34 @@ export default function App() {
         </div>
       </div>
 
-      {/* HALAMAN 1: PIPELINE */}
       {activeMenu === 'pipeline' && (
         <div className="p-6 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
-          <div className="text-xs text-gray-400 mb-4 font-medium tracking-wide">/ Klip_Vidio / Pipeline</div>
-          <div className="flex justify-between items-start mb-6">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900">Pipeline riset barang & mentahan video</h2>
-              <p className="text-gray-500 text-sm mt-1">Satu kode = satu barang/kampanye video. Klik kartu untuk buka detail, catatan editor Rahmat, dan jadwal Repliz.</p>
-            </div>
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <button className="bg-white border border-gray-300 text-emerald-700 hover:bg-emerald-50 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm">
-                  <Database className="w-4 h-4" /> Scrape Mentahan OneDrive
-                </button>
-                <button className="bg-white border border-gray-300 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors shadow-sm">
-                  <Calendar className="w-4 h-4" /> Jadwal Random Repliz
-                </button>
-              </div>
-              <button className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm">
-                <BarChart2 className="w-4 h-4" /> Lihat Laporan & Kekuatan Tim
-              </button>
-            </div>
-          </div>
-          
-          <div className="flex gap-4 mb-8">
-            <div className="relative flex-1">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-5 w-5 text-gray-400" /></div>
-              <input type="text" placeholder="Cari kode SKU, nama barang, kategori..." className="bg-white border border-gray-300 text-sm rounded-xl focus:ring-emerald-500 focus:border-emerald-500 block w-full pl-10 p-3 shadow-sm" />
-            </div>
-            <button className="bg-white border border-gray-300 px-6 py-3 rounded-xl text-sm font-semibold text-gray-700 hover:bg-gray-50 shadow-sm">Cari</button>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <div className="lg:col-span-2 bg-white rounded-2xl border border-gray-200 shadow-sm p-6 text-center text-gray-500">
-               <Video className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-               <p>Daftar Kartu Pipeline Aktif (Sesuai desain Anda sebelumnya)</p>
-            </div>
-            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 text-center text-gray-500">
-               <p>Form Input Barang Baru</p>
-            </div>
-          </div>
+           <div className="text-center text-gray-500 py-20 bg-white rounded-xl border mt-10">Fitur Pipeline Aktif (Sesuai Desain Anda Sebelumnya)</div>
         </div>
       )}
 
-      {/* HALAMAN 2: LAPORAN ANALITIK FYP */}
       {activeMenu === 'analitik' && (
         <div className="p-6 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
+          
           <div className="flex justify-between items-center mb-6">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Performa FYP & Evaluasi</h2>
-              <p className="text-gray-500 mt-1">Saring data, pantau view, dan minta AI menganalisa hook video.</p>
+              <p className="text-gray-500 mt-1">Saring data, pantau view, dan eksekusi bot scraper.</p>
             </div>
-            <button onClick={fetchData} disabled={loading} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-semibold shadow-sm transition-colors disabled:opacity-50">
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> {loading ? 'Menyinkronkan...' : 'Sinkron Data Sheet'}
-            </button>
+            
+            <div className="flex gap-3">
+              <button onClick={fetchData} disabled={loading || isBotRunning} className="flex items-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-5 py-2.5 rounded-xl font-semibold shadow-sm transition-colors disabled:opacity-50">
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Sinkron Data
+              </button>
+              
+              <button onClick={runBotScraper} disabled={isBotRunning || loading} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-semibold shadow-sm transition-colors disabled:opacity-50">
+                {isBotRunning ? (
+                  <><RefreshCw className="w-4 h-4 animate-spin" /> Menjalankan Bot...</>
+                ) : (
+                  <><PlayCircle className="w-4 h-4" /> Jalankan Bot Scraper</>
+                )}
+              </button>
+            </div>
           </div>
 
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-wrap gap-4 items-center">
@@ -251,7 +290,17 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6 relative">
+            
+            {/* OVERLAY LOADING SAAT BOT BERJALAN */}
+            {isBotRunning && (
+              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
+                <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin mb-3" />
+                <h3 className="font-bold text-gray-900 text-lg">Bot Sedang Bekerja...</h3>
+                <p className="text-sm text-gray-500 font-medium">Mengecek RapidAPI dan mengupdate Google Sheets. Jangan tutup halaman ini.</p>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -269,7 +318,6 @@ export default function App() {
                   ) : filteredData.length === 0 ? (
                     <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-400 font-semibold">Tidak ada video yang cocok dengan filter.</td></tr>
                   ) : (
-                    // PERUBAHAN: Memetakan currentData alih-alih seluruh filteredData
                     currentData.map((row, index) => {
                       const badgeStyle = getFypBadgeStyle(row.Video_FYP);
                       const isFyp = badgeStyle.icon !== null;
@@ -318,28 +366,17 @@ export default function App() {
               </table>
             </div>
 
-            {/* PANEL PAGINATION (KONTROL HALAMAN) */}
             {!loading && filteredData.length > 0 && (
               <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
                 <p className="text-sm text-gray-500 font-medium">
-                  Menampilkan <span className="font-bold text-gray-900">{startIndex + 1}</span> hingga <span className="font-bold text-gray-900">{Math.min(endIndex, filteredData.length)}</span> dari total <span className="font-bold text-gray-900">{filteredData.length}</span> data
+                  Menampilkan <span className="font-bold text-gray-900">{startIndex + 1}</span> hingga <span className="font-bold text-gray-900">{Math.min(endIndex, filteredData.length)}</span> dari <span className="font-bold text-gray-900">{filteredData.length}</span> data
                 </p>
                 <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    disabled={currentPage === 1}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors"
-                  >
+                  <button onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 shadow-sm transition-colors">
                     <ChevronLeft className="w-4 h-4" /> Sebelumnya
                   </button>
-                  <span className="text-sm font-semibold text-gray-600 px-2">
-                    Halaman {currentPage} dari {totalPages}
-                  </span>
-                  <button 
-                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    disabled={currentPage === totalPages}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors"
-                  >
+                  <span className="text-sm font-semibold text-gray-600 px-2">Halaman {currentPage} dari {totalPages}</span>
+                  <button onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 shadow-sm transition-colors">
                     Selanjutnya <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
