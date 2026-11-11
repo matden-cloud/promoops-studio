@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   Search, LayoutDashboard, BarChart2, MessageSquare, Database,
-  Calendar, Filter, Zap, Flame, Rocket
+  Calendar, Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight
 } from 'lucide-react';
 
 export default function App() {
@@ -15,6 +15,10 @@ export default function App() {
   const [filterBulan, setFilterBulan] = useState('Semua');
   const [filterAkun, setFilterAkun] = useState('Semua');
   const [filterFyp, setFilterFyp] = useState('Semua');
+
+  // STATE BARU: Untuk Pagination (Halaman)
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const API_URL = "https://script.google.com/macros/s/AKfycbwTxa-MqVkrK65FPqNfR8ZglL17sZQ5QTExgQ0jtc_U--MXMoo4PrHnpOlpfmZQaS1n0g/exec";
 
@@ -29,7 +33,6 @@ export default function App() {
     }
   };
 
-  // LOGIKA BARU: Deteksi Kelas FYP berdasarkan teks dari Bot Apps Script
   const matchFypFilter = (status, filterValue) => {
     if (filterValue === 'Semua') return true;
     const s = (status || "").toLowerCase();
@@ -46,7 +49,6 @@ export default function App() {
     return true;
   };
 
-  // LOGIKA BARU: Pewarnaan Badge Otomatis
   const getFypBadgeStyle = (status) => {
     if (!status) return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
     const s = status.toLowerCase();
@@ -83,6 +85,11 @@ export default function App() {
     fetchData();
   }, []);
 
+  // EFEK BARU: Kembalikan ke Halaman 1 setiap kali Filter diubah
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterBulan, filterAkun, filterFyp]);
+
   const listBulan = ['Semua', ...new Set(data.map(item => getBulanFormat(item.Tanggal_Upload)).filter(b => b !== 'Tanpa Tanggal' && b !== 'Format Tidak Dikenal'))];
   const listAkun = ['Semua', ...new Set(data.map(item => item.Nama_Akun || item.Id_Akun).filter(Boolean))];
 
@@ -99,6 +106,12 @@ export default function App() {
     const s = (v.Video_FYP || "").toLowerCase();
     return (s.includes('fyp') || s.includes('viral')) && !s.includes('belum');
   }).length;
+
+  // LOGIKA PAGINATION: Memotong data untuk halaman yang sedang aktif
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const currentData = filteredData.slice(startIndex, endIndex);
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12">
@@ -160,7 +173,6 @@ export default function App() {
             </div>
           </div>
           
-          {/* Form Pencarian & Kartu Pipeline diringkas (Sama dengan versi sebelumnya) */}
           <div className="flex gap-4 mb-8">
             <div className="relative flex-1">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="h-5 w-5 text-gray-400" /></div>
@@ -194,7 +206,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* BARIS FILTER BARU DENGAN TINGKATAN FYP */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-wrap gap-4 items-center">
             <div className="flex items-center gap-2 text-sm font-bold text-gray-700 mr-2">
               <Filter className="w-5 h-5 text-emerald-600" /> Filter Data:
@@ -216,7 +227,6 @@ export default function App() {
             </select>
           </div>
 
-          {/* WIDGET STATISTIK */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-5">
               <div className="p-4 bg-blue-50 text-blue-600 rounded-xl"><Video className="w-7 h-7" /></div>
@@ -241,8 +251,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* TABEL DATA */}
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -260,8 +269,8 @@ export default function App() {
                   ) : filteredData.length === 0 ? (
                     <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-400 font-semibold">Tidak ada video yang cocok dengan filter.</td></tr>
                   ) : (
-                    filteredData.slice(0, 100).map((row, index) => {
-                      // Ambil gaya pewarnaan dinamis
+                    // PERUBAHAN: Memetakan currentData alih-alih seluruh filteredData
+                    currentData.map((row, index) => {
                       const badgeStyle = getFypBadgeStyle(row.Video_FYP);
                       const isFyp = badgeStyle.icon !== null;
 
@@ -308,6 +317,34 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+
+            {/* PANEL PAGINATION (KONTROL HALAMAN) */}
+            {!loading && filteredData.length > 0 && (
+              <div className="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between">
+                <p className="text-sm text-gray-500 font-medium">
+                  Menampilkan <span className="font-bold text-gray-900">{startIndex + 1}</span> hingga <span className="font-bold text-gray-900">{Math.min(endIndex, filteredData.length)}</span> dari total <span className="font-bold text-gray-900">{filteredData.length}</span> data
+                </p>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" /> Sebelumnya
+                  </button>
+                  <span className="text-sm font-semibold text-gray-600 px-2">
+                    Halaman {currentPage} dari {totalPages}
+                  </span>
+                  <button 
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    className="flex items-center gap-1 px-3 py-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm transition-colors"
+                  >
+                    Selanjutnya <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
