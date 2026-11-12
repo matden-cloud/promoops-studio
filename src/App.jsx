@@ -2,39 +2,109 @@ import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   LayoutDashboard, BarChart2, MessageSquare, Database,
-  Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit
+  Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
+  X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
+  ShieldAlert, Star, Plus
 } from 'lucide-react';
 
-export default function App() {
-  const [activeMenu, setActiveMenu] = useState('analitik'); 
+// --- DATA SIMULASI UNTUK REKAP PIPELINE (SEBELUM DISAMBUNG KE SHEETS) ---
+const INITIAL_PRODUCT_STATS = [
+  { id: 1, produk: 'Nozzle Lem Silikon', bulan: '2026-11', tanggal: '2026-11-12', tim: 'Deni Rohmat', mentahan: 16, belumDipakai: 6, dipakai: 10, videoFinal: 12, upload: 10, isWinning: true },
+  { id: 2, produk: 'Perata Keramik', bulan: '2026-11', tanggal: '2026-11-12', tim: 'Rahmat Pajari', mentahan: 14, belumDipakai: 4, dipakai: 10, videoFinal: 15, upload: 12, isWinning: true },
+  { id: 3, produk: 'Alat Lepas Busi Rusak Mobil', bulan: '2026-11', tanggal: '2026-11-11', tim: 'Deni Rohmat', mentahan: 11, belumDipakai: 3, dipakai: 8, videoFinal: 10, upload: 11, isWinning: false },
+  { id: 4, produk: 'Saringan Talang Air Stainless', bulan: '2026-11', tanggal: '2026-11-11', tim: 'Ikhsan Harun', mentahan: 10, belumDipakai: 2, dipakai: 8, videoFinal: 8, upload: 8, isWinning: false },
+  { id: 5, produk: 'Kunci Pemutar Dongkrak Mobil', bulan: '2026-11', tanggal: '2026-11-10', tim: 'Deni Rohmat', mentahan: 12, belumDipakai: 5, dipakai: 7, videoFinal: 9, upload: 9, isWinning: true },
+  { id: 6, produk: 'Spons Amplas Pembersih Kaca', bulan: '2026-11', tanggal: '2026-11-10', tim: 'Mochamad Rizal', mentahan: 12, belumDipakai: 4, dipakai: 8, videoFinal: 11, upload: 10, isWinning: false },
+  { id: 7, produk: 'Mangkok Baut Magnetik', bulan: '2026-10', tanggal: '2026-10-28', tim: 'Rahmat Pajari', mentahan: 25, belumDipakai: 5, dipakai: 20, videoFinal: 22, upload: 20, isWinning: true },
+  { id: 8, produk: 'Mata Bor Hole Diamond 3 Tahap', bulan: '2026-10', tanggal: '2026-10-25', tim: 'Mochamad Rizal', mentahan: 18, belumDipakai: 2, dipakai: 16, videoFinal: 21, upload: 21, isWinning: true },
+];
 
+const INITIAL_DAILY_STATS = [
+  { tanggal: '2026-11-12', labelTanggal: '12/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 18, diedit: 12, upload: 5, target: 15 },
+  { tanggal: '2026-11-11', labelTanggal: '11/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 24, diedit: 16, upload: 15, target: 15 },
+  { tanggal: '2026-11-10', labelTanggal: '10/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 28, diedit: 18, upload: 18, target: 15 },
+  { tanggal: '2026-11-09', labelTanggal: '09/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 20, diedit: 15, upload: 17, target: 15 },
+  { tanggal: '2026-11-08', labelTanggal: '08/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 22, diedit: 14, upload: 14, target: 15 },
+  { tanggal: '2026-11-07', labelTanggal: '07/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 30, diedit: 19, upload: 18, target: 15 },
+];
+
+const INITIAL_VIOLATIONS = [
+  { id: 1, tanggal: '11/11/2026', akun: 'Akun 1 - Deni Rohmat', produk: 'Pisau Mesin Kawat', jenis: 'Produk Berbahaya / Tajam', status: 'Banding Diterima', catatan: 'Hindari memperlihatkan mata pisau berputar terlalu dekat ke kamera.' },
+  { id: 2, tanggal: '08/11/2026', akun: 'Akun 3 - Mochamad Rizal', produk: 'Quick Drying Sealant', jenis: 'Klaim Berlebihan', status: 'Menunggu Banding', catatan: 'Ganti teks klaim instan 1 detik di hook awal.' }
+];
+
+export default function App() {
+  // Default ke 'pipeline' agar bisa langsung melihat rekap baru, bisa diganti ke 'analitik'
+  const [activeMenu, setActiveMenu] = useState('pipeline'); 
+
+  // --- STATE HALAMAN ANALITIK FYP ---
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [botReport, setBotReport] = useState(null); 
 
-  // --- STATE UNTUK ANALISA GEMINI ---
+  // --- STATE ANALISA GEMINI ---
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
+
+  // --- STATE HALAMAN REKAP PIPELINE (BARANG, MENTAHAN, PRODUKSI, UPLOAD) ---
+  const [productStats, setProductStats] = useState(INITIAL_PRODUCT_STATS);
+  const [dailyStats] = useState(INITIAL_DAILY_STATS);
+  const [rekapBulan, setRekapBulan] = useState('2026-11');
+  const [rekapTanggal, setRekapTanggal] = useState('');
+  const [rekapProduk, setRekapProduk] = useState('Semua');
+  const [rekapTim, setRekapTim] = useState('Semua');
+  const [sortBy, setSortBy] = useState('mentahan'); // 'mentahan' | 'videoFinal' | 'upload'
+  const [onlyWinning, setOnlyWinning] = useState(false);
+
+  // --- STATE HALAMAN PELANGGARAN ---
+  const [violations, setViolations] = useState(INITIAL_VIOLATIONS);
+  const [newViolation, setNewViolation] = useState({ akun: '', produk: '', jenis: '', catatan: '' });
 
   // ⚠️ API KEY & URL
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
   const API_URL = "https://script.google.com/macros/s/AKfycbwTxa-MqVkrK65FPqNfR8ZglL17sZQ5QTExgQ0jtc_U--MXMoo4PrHnpOlpfmZQaS1n0g/exec";
 
-  // STATE FILTER & PAGINATION
+  // STATE FILTER & PAGINATION ANALITIK FYP
   const [filterBulan, setFilterBulan] = useState('Semua');
   const [filterAkun, setFilterAkun] = useState('Semua');
   const [filterFyp, setFilterFyp] = useState('Semua');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
+  // --- FUNGSI TOGGLE BINTANG "WINNING MENTAHAN" ---
+  const toggleWinningProduct = (id) => {
+    setProductStats(prev => prev.map(item => 
+      item.id === id ? { ...item, isWinning: !item.isWinning } : item
+    ));
+  };
+
+  // --- FUNGSI TAMBAH PELANGGARAN ---
+  const handleAddViolation = (e) => {
+    e.preventDefault();
+    if (!newViolation.akun || !newViolation.produk || !newViolation.jenis) return;
+    const today = new Date().toLocaleDateString('id-ID');
+    setViolations([
+      {
+        id: Date.now(),
+        tanggal: today,
+        akun: newViolation.akun,
+        produk: newViolation.produk,
+        jenis: newViolation.jenis,
+        status: 'Evaluasi Baru',
+        catatan: newViolation.catatan || '-'
+      },
+      ...violations
+    ]);
+    setNewViolation({ akun: '', produk: '', jenis: '', catatan: '' });
+  };
+
   // --- FUNGSI MEMANGGIL GEMINI API ---
   const analyzeWithGemini = async (row) => {
-    if (GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
-      alert("Harap masukkan API Key Gemini Anda terlebih dahulu di dalam kode App.jsx.");
+    if (!GEMINI_API_KEY || GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
+      alert("Harap pastikan VITE_GEMINI_API_KEY sudah terpasang di Environment Variables.");
       return;
     }
 
@@ -154,6 +224,7 @@ export default function App() {
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
 
+  // --- FILTERING DATA ANALITIK FYP ---
   const listBulan = ['Semua', ...new Set(data.map(item => getBulanFormat(item.Tanggal_Upload)).filter(b => b !== 'Tanpa Tanggal' && b !== 'Format Tidak Dikenal'))];
   const listAkun = ['Semua', ...new Set(data.map(item => item.Nama_Akun || item.Id_Akun).filter(Boolean))];
 
@@ -175,6 +246,30 @@ export default function App() {
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
+
+  // --- FILTERING & SORTING DATA REKAP PIPELINE ---
+  const filteredProducts = productStats
+    .filter(item => {
+      const mBulan = rekapBulan === 'Semua' || item.bulan === rekapBulan;
+      const mTanggal = !rekapTanggal || item.tanggal === rekapTanggal;
+      const mProduk = rekapProduk === 'Semua' || item.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || item.tim === rekapTim;
+      const mWin = !onlyWinning || item.isWinning;
+      return mBulan && mTanggal && mProduk && mTim && mWin;
+    })
+    .sort((a, b) => b[sortBy] - a[sortBy]);
+
+  const filteredDaily = dailyStats.filter(item => {
+    const mBulan = rekapBulan === 'Semua' || item.bulan === rekapBulan;
+    const mTanggal = !rekapTanggal || item.tanggal === rekapTanggal;
+    return mBulan && mTanggal;
+  });
+
+  const totalMentahanRekap = filteredProducts.reduce((acc, cur) => acc + cur.mentahan, 0);
+  const totalBelumDipakaiRekap = filteredProducts.reduce((acc, cur) => acc + cur.belumDipakai, 0);
+  const totalDipakaiRekap = filteredProducts.reduce((acc, cur) => acc + cur.dipakai, 0);
+  const totalFinalRekap = filteredProducts.reduce((acc, cur) => acc + cur.videoFinal, 0);
+  const totalUploadRekap = filteredProducts.reduce((acc, cur) => acc + cur.upload, 0);
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative">
@@ -241,49 +336,259 @@ export default function App() {
         </div>
       )}
 
-      {/* HEADER NAVIGASI (SUDAH RESPONSIF) */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col md:flex-row items-center justify-between gap-4 sticky top-0 z-30 shadow-sm">
-        <div className="flex items-center gap-3 w-full md:w-auto justify-center md:justify-start">
+      {/* HEADER NAVIGASI RESPONSIF */}
+      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col lg:flex-row items-center justify-between gap-4 sticky top-0 z-30 shadow-sm">
+        <div className="flex items-center gap-3 w-full lg:w-auto justify-center lg:justify-start">
           <div className="w-10 h-10 bg-emerald-700 text-white rounded-lg flex items-center justify-center font-bold text-lg shrink-0">RP</div>
           <div>
             <h1 className="font-bold text-gray-900 text-sm">PromoOps & Riset</h1>
-            <p className="text-xs text-gray-500">OneDrive • Repliz • View</p>
+            <p className="text-xs text-gray-500">OneDrive • Produksi • Publisher</p>
           </div>
         </div>
         
-        <div className="flex flex-wrap justify-center bg-gray-50 p-1 rounded-lg border border-gray-200 shadow-inner w-full md:w-auto">
-          <button onClick={() => setActiveMenu('pipeline')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pipeline' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
-            <LayoutDashboard className="w-4 h-4" /> Barang
+        <div className="flex flex-wrap justify-center bg-gray-50 p-1 rounded-lg border border-gray-200 shadow-inner w-full lg:w-auto gap-1">
+          <button onClick={() => setActiveMenu('pipeline')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pipeline' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+            <LayoutDashboard className="w-4 h-4" /> Rekap & Pipeline
           </button>
           <button onClick={() => setActiveMenu('analitik')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'analitik' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
             <BarChart2 className="w-4 h-4" /> Laporan FYP
           </button>
-          <button className="px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-all">
-            <MessageSquare className="w-4 h-4 hidden sm:block" /> Chat Bot
+          <button onClick={() => setActiveMenu('pelanggaran')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pelanggaran' ? 'bg-red-50 text-red-700 shadow-sm border border-red-200' : 'text-gray-500 hover:text-red-600'}`}>
+            <ShieldAlert className="w-4 h-4" /> Pelanggaran ({violations.length})
           </button>
         </div>
 
-        <div className="flex items-center justify-center gap-3 w-full md:w-auto">
-          <button className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors">
-            <Database className="w-4 h-4" /> Buka Agent
+        <div className="flex items-center justify-center gap-3 w-full lg:w-auto">
+          <button className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-2 transition-colors">
+            <Database className="w-4 h-4" /> Sync OneDrive Bot
           </button>
           <div className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-full bg-white">
             <div className="w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">DV</div>
-            <span className="text-xs font-semibold text-gray-700 hidden sm:block">Divisi</span>
+            <span className="text-xs font-semibold text-gray-700 hidden sm:block">Divisi Video</span>
           </div>
         </div>
       </div>
 
+      {/* ========================================================================= */}
+      {/* HALAMAN 1: REKAP MENTAHAN, PRODUKSI & UPLOAD (SESUAI PERMINTAAN BARU)     */}
+      {/* ========================================================================= */}
       {activeMenu === 'pipeline' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
-           <div className="text-center text-gray-500 py-20 bg-white rounded-xl border mt-10">Fitur Pipeline Aktif (Sesuai Desain Anda Sebelumnya)</div>
+          
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
+              <p className="text-gray-500 mt-1">Filter per bulan, tanggal, dan produk untuk memantau total pengerjaan tim & menandai mentahan bagus.</p>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => setOnlyWinning(!onlyWinning)}
+                className={`px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border transition-all ${onlyWinning ? 'bg-amber-100 text-amber-800 border-amber-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
+              >
+                <Star className={`w-4 h-4 ${onlyWinning ? 'fill-amber-500 text-amber-500' : 'text-gray-400'}`} />
+                {onlyWinning ? 'Menampilkan Mentahan Bagus ⭐' : 'Filter Mentahan Bagus'}
+              </button>
+            </div>
+          </div>
+
+          {/* 1. FILTER TERPADU (BULAN, HARI, PRODUK, TIM) */}
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Bulan</label>
+              <select value={rekapBulan} onChange={(e) => setRekapBulan(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
+                <option value="2026-11">📅 November 2026</option>
+                <option value="2026-10">📅 Oktober 2026</option>
+                <option value="Semua">Semua Bulan</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tanggal / Hari</label>
+              <div className="flex gap-1">
+                <input 
+                  type="date" 
+                  value={rekapTanggal}
+                  onChange={(e) => setRekapTanggal(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2 font-semibold"
+                />
+                {rekapTanggal && (
+                  <button onClick={() => setRekapTanggal('')} className="px-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-bold">Reset</button>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Filter Produk</label>
+              <select value={rekapProduk} onChange={(e) => setRekapProduk(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
+                <option value="Semua">📦 Semua Produk</option>
+                {[...new Set(productStats.map(p => p.produk))].map(prod => (
+                  <option key={prod} value={prod}>{prod}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tim / Akun</label>
+              <select value={rekapTim} onChange={(e) => setRekapTim(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
+                <option value="Semua">👥 Semua Tim & Publisher</option>
+                <option value="Rahmat Pajari">Rahmat Pajari</option>
+                <option value="Deni Rohmat">Deni Rohmat</option>
+                <option value="Ikhsan Harun">Ikhsan Harun</option>
+                <option value="Mochamad Rizal">Mochamad Rizal</option>
+              </select>
+            </div>
+          </div>
+
+          {/* 2. TIGA KARTU TOTAL SESUAI FILTER */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
+              <div>
+                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">1. Total Mentahan (Raw)</p>
+                <h3 className="text-3xl font-black text-gray-900 mt-1">{totalMentahanRekap} <span className="text-sm font-semibold text-gray-400">file</span></h3>
+                <p className="text-xs text-gray-500 mt-1">{totalBelumDipakaiRekap} belum dipakai • {totalDipakaiRekap} dipakai</p>
+              </div>
+              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">OneDrive</div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
+              <div>
+                <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">2. Video Final (Production)</p>
+                <h3 className="text-3xl font-black text-gray-900 mt-1">{totalFinalRekap} <span className="text-sm font-semibold text-gray-400">klip selesai</span></h3>
+                <p className="text-xs text-gray-500 mt-1">Berdasarkan tanggal selesai edit</p>
+              </div>
+              <div className="p-3 bg-amber-50 text-amber-600 rounded-xl font-bold text-xs">Editor</div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
+              <div>
+                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">3. Total Upload (Publisher)</p>
+                <h3 className="text-3xl font-black text-gray-900 mt-1">{totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang</span></h3>
+                <p className="text-xs text-emerald-600 font-semibold mt-1">Target: 5 Akun × 3 Video (15/hari)</p>
+              </div>
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs">5 Akun</div>
+            </div>
+          </div>
+
+          {/* 3. DUA TABEL UTAMA: REKAP PER PRODUK & TRACKING HARIAN */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* TABEL KIRI: REKAP PER PRODUK (BISA DIURUTKAN & TANDAI BAGUS) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-gray-50">
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">Peringkat per Produk</h3>
+                  <p className="text-xs text-gray-500">Klik bintang ⭐ untuk menandai mentahan bagus bulan ini</p>
+                </div>
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="text-gray-500 font-semibold mr-1">Urutkan:</span>
+                  <button onClick={() => setSortBy('mentahan')} className={`px-2 py-1 rounded font-bold ${sortBy === 'mentahan' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600'}`}>Mentahan</button>
+                  <button onClick={() => setSortBy('videoFinal')} className={`px-2 py-1 rounded font-bold ${sortBy === 'videoFinal' ? 'bg-amber-600 text-white' : 'bg-white border text-gray-600'}`}>Edit</button>
+                  <button onClick={() => setSortBy('upload')} className={`px-2 py-1 rounded font-bold ${sortBy === 'upload' ? 'bg-emerald-600 text-white' : 'bg-white border text-gray-600'}`}>Upload</button>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-gray-600 bg-gray-50/50 text-xs uppercase">
+                      <th className="py-3 px-4 font-bold">Nama Produk</th>
+                      <th className="py-3 px-3 font-bold text-center text-blue-700">Mentahan</th>
+                      <th className="py-3 px-3 font-bold text-center text-amber-700">Video Final</th>
+                      <th className="py-3 px-3 font-bold text-center text-emerald-700">Upload</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredProducts.length === 0 ? (
+                      <tr><td colSpan="4" className="py-8 text-center text-gray-400 font-semibold">Tidak ada data produk sesuai filter.</td></tr>
+                    ) : (
+                      filteredProducts.map((item) => (
+                        <tr key={item.id} className="hover:bg-gray-50">
+                          <td className="py-3 px-4">
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => toggleWinningProduct(item.id)}
+                                title="Tandai Bagus Bulan Ini"
+                                className="focus:outline-none"
+                              >
+                                <Star className={`w-4 h-4 transition-colors ${item.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
+                              </button>
+                              <div>
+                                <p className="font-bold text-gray-900">{item.produk}</p>
+                                <span className="text-[11px] text-gray-400 font-medium">{item.tim} • Sisa {item.belumDipakai} raw</span>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-center font-black text-blue-600 bg-blue-50/30">{item.mentahan}</td>
+                          <td className="py-3 px-3 text-center font-black text-amber-600">{item.videoFinal}</td>
+                          <td className="py-3 px-3 text-center font-black text-emerald-600 bg-emerald-50/30">{item.upload}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* TABEL KANAN: TRACKING HARIAN (UPLOAD, EDIT, MENTAHAN PER HARI) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm">Tracking Harian (Per Tanggal)</h3>
+                  <p className="text-xs text-gray-500">Pantau kekuatan harian (Target 5 Akun = 15 Video/Hari)</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 text-gray-600 bg-gray-50/50 text-xs uppercase">
+                      <th className="py-3 px-4 font-bold">Tanggal</th>
+                      <th className="py-3 px-3 font-bold text-center">Mentahan</th>
+                      <th className="py-3 px-3 font-bold text-center">Diedit</th>
+                      <th className="py-3 px-3 font-bold text-center">Upload</th>
+                      <th className="py-3 px-4 font-bold text-right">Status Target</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredDaily.map((day, idx) => {
+                      const isTargetMet = day.upload >= day.target;
+                      return (
+                        <tr key={idx} className="hover:bg-gray-50">
+                          <td className="py-3 px-4 font-bold text-gray-900">{day.labelTanggal}</td>
+                          <td className="py-3 px-3 text-center font-semibold text-blue-600">{day.mentahan}</td>
+                          <td className="py-3 px-3 text-center font-semibold text-amber-600">{day.diedit}</td>
+                          <td className={`py-3 px-3 text-center font-black ${isTargetMet ? 'text-emerald-600' : 'text-amber-600'}`}>{day.upload}</td>
+                          <td className="py-3 px-4 text-right">
+                            {day.upload > day.target ? (
+                              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
+                                Melampaui ({day.upload}/{day.target})
+                              </span>
+                            ) : isTargetMet ? (
+                              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
+                                Tercapai ({day.upload}/{day.target})
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-xs font-bold">
+                                Kurang {day.target - day.upload} ({day.upload}/{day.target})
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+          </div>
         </div>
       )}
 
+      {/* ========================================================================= */}
+      {/* HALAMAN 2: LAPORAN ANALITIK FYP                                           */}
+      {/* ========================================================================= */}
       {activeMenu === 'analitik' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
           
-          {/* JUDUL DAN TOMBOL (SUDAH RESPONSIF) */}
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div className="w-full text-center md:text-left">
               <h2 className="text-2xl font-bold text-gray-900">Performa FYP & Evaluasi</h2>
@@ -305,7 +610,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* FILTER DATA (SUDAH RESPONSIF) */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row flex-wrap gap-3 md:gap-4 items-center">
             <div className="flex items-center justify-center sm:justify-start gap-2 text-sm font-bold text-gray-700 w-full sm:w-auto mb-2 sm:mb-0">
               <Filter className="w-5 h-5 text-emerald-600" /> Filter Data:
@@ -429,7 +733,6 @@ export default function App() {
               </table>
             </div>
 
-            {/* PAGINATION (SUDAH RESPONSIF) */}
             {!loading && filteredData.length > 0 && (
               <div className="px-4 md:px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-4 text-center md:text-left">
                 <p className="text-sm text-gray-500 font-medium">
@@ -449,6 +752,111 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* HALAMAN 3: EVALUASI VIDEO PELANGGARAN (TERPISAH KHUSUS)                   */}
+      {/* ========================================================================= */}
+      {activeMenu === 'pelanggaran' && (
+        <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
+              <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
+            </h2>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, ajukan banding, dan beri catatan perbaikan untuk tim editor & publisher.</p>
+          </div>
+
+          {/* FORM TAMBAH PELANGGARAN BARU */}
+          <form onSubmit={handleAddViolation} className="bg-white p-5 rounded-2xl shadow-sm border border-red-200 mb-6">
+            <h3 className="font-bold text-gray-900 text-sm mb-3 flex items-center gap-2">
+              <Plus className="w-4 h-4 text-red-600" /> Catat Pelanggaran Baru
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              <select 
+                value={newViolation.akun} 
+                onChange={(e) => setNewViolation({...newViolation, akun: e.target.value})}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+                required
+              >
+                <option value="">Pilih Akun Terdampak...</option>
+                <option value="Akun 1 - Deni Rohmat">Akun 1 - Deni Rohmat</option>
+                <option value="Akun 2 - Ikhsan Harun">Akun 2 - Ikhsan Harun</option>
+                <option value="Akun 3 - Mochamad Rizal">Akun 3 - Mochamad Rizal</option>
+                <option value="Akun 4 - Publisher 4">Akun 4 - Publisher 4</option>
+                <option value="Akun 5 - Publisher 5">Akun 5 - Publisher 5</option>
+              </select>
+
+              <input 
+                type="text" 
+                placeholder="Nama Produk (mis: Pisau Mesin)..."
+                value={newViolation.produk}
+                onChange={(e) => setNewViolation({...newViolation, produk: e.target.value})}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+                required
+              />
+
+              <select 
+                value={newViolation.jenis}
+                onChange={(e) => setNewViolation({...newViolation, jenis: e.target.value})}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+                required
+              >
+                <option value="">Jenis Pelanggaran...</option>
+                <option value="Produk Berbahaya / Tajam">Produk Berbahaya / Tajam</option>
+                <option value="Konten Tidak Orisinal / Reupload">Konten Tidak Orisinal / Reupload</option>
+                <option value="Klaim Berlebihan / Misleading">Klaim Berlebihan / Misleading</option>
+                <option value="Audio / Musik Hak Cipta">Audio / Musik Hak Cipta</option>
+              </select>
+
+              <input 
+                type="text" 
+                placeholder="Catatan perbaikan untuk tim..."
+                value={newViolation.catatan}
+                onChange={(e) => setNewViolation({...newViolation, catatan: e.target.value})}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+              />
+            </div>
+            <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm">
+              Simpan Data Pelanggaran
+            </button>
+          </form>
+
+          {/* TABEL DAFTAR PELANGGARAN */}
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-sm min-w-[700px]">
+                <thead>
+                  <tr className="bg-red-50/60 text-red-900 border-b border-red-100 text-xs uppercase">
+                    <th className="py-3.5 px-4 font-bold">Tanggal & Akun</th>
+                    <th className="py-3.5 px-4 font-bold">Produk</th>
+                    <th className="py-3.5 px-4 font-bold">Jenis Pelanggaran</th>
+                    <th className="py-3.5 px-4 font-bold">Status</th>
+                    <th className="py-3.5 px-4 font-bold">Evaluasi / Tindakan</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {violations.map((v) => (
+                    <tr key={v.id} className="hover:bg-gray-50">
+                      <td className="py-3.5 px-4">
+                        <p className="font-bold text-gray-900">{v.akun}</p>
+                        <span className="text-xs text-gray-500">{v.tanggal}</span>
+                      </td>
+                      <td className="py-3.5 px-4 font-bold text-gray-800">{v.produk}</td>
+                      <td className="py-3.5 px-4">
+                        <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">
+                          {v.jenis}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 font-semibold text-gray-700">{v.status}</td>
+                      <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
