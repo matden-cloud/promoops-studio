@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
-  LayoutDashboard, BarChart2, MessageSquare, Database,
+  LayoutDashboard, BarChart2, Database,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus, FileText, Image as ImageIcon, FolderOpen, Send, Printer
+  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer
 } from 'lucide-react';
 
 // --- DATA SIMULASI UNTUK REKAP PIPELINE ---
@@ -38,6 +38,7 @@ const INITIAL_VIOLATIONS = [
     status: 'Banding Diterima', 
     linkVideo: 'https://www.tiktok.com/@tiktok/video/7123456789',
     screenshot: null,
+    screenshotBanding: null,
     catatan: 'Hindari memperlihatkan mata pisau berputar terlalu dekat ke kamera.' 
   },
   { 
@@ -45,13 +46,27 @@ const INITIAL_VIOLATIONS = [
     tanggal: '08/11/2026', 
     akun: 'Akun 3 - Mochamad Rizal', 
     produk: 'Quick Drying Sealant', 
-    jenis: 'Klaim Berlebihan', 
+    jenis: 'Klaim Berlebihan / Misleading', 
     status: 'Menunggu Banding', 
     linkVideo: 'https://www.tiktok.com/@tiktok/video/7987654321',
     screenshot: null,
+    screenshotBanding: null,
     catatan: 'Ganti teks klaim instan 1 detik di hook awal.' 
   }
 ];
+
+const EMPTY_VIOLATION_FORM = {
+  akun: '', 
+  produk: '', 
+  jenis: '', 
+  status: 'Belum Banding',
+  catatan: '', 
+  linkVideo: '', 
+  screenshot: null, 
+  screenshotName: '',
+  screenshotBanding: null,
+  screenshotBandingName: ''
+};
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
@@ -79,7 +94,7 @@ export default function App() {
   const [onlyWinning, setOnlyWinning] = useState(false);
 
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE (KLIK ANGKA 16, 12, 10) ---
-  const [drillDownModal, setDrillDownModal] = useState(null); // { title, subtitle, category, count, items: [] }
+  const [drillDownModal, setDrillDownModal] = useState(null);
 
   // --- STATE ASISTEN AI PEMBACA WEB & PEMBUAT LAPORAN PPT/PDF ---
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
@@ -87,12 +102,11 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
-  // --- STATE HALAMAN PELANGGARAN (DENGAN LINK & SCREENSHOT) ---
+  // --- STATE HALAMAN PELANGGARAN (DENGAN EDIT, STATUS & 2 SCREENSHOT) ---
   const [violations, setViolations] = useState(INITIAL_VIOLATIONS);
-  const [newViolation, setNewViolation] = useState({ 
-    akun: '', produk: '', jenis: '', catatan: '', linkVideo: '', screenshot: null, screenshotName: '' 
-  });
-  const [previewImage, setPreviewImage] = useState(null);
+  const [newViolation, setNewViolation] = useState(EMPTY_VIOLATION_FORM);
+  const [editingViolationId, setEditingViolationId] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null); // { url, title }
 
   // ⚠️ API KEY & URL
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -104,6 +118,15 @@ export default function App() {
   const [filterFyp, setFilterFyp] = useState('Semua');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
+
+  // --- FUNGSI WARNA BADGE STATUS BANDING ---
+  const getViolationStatusStyle = (status) => {
+    const s = (status || '').toLowerCase();
+    if (s.includes('diterima')) return 'bg-emerald-50 text-emerald-700 border-emerald-300';
+    if (s.includes('ditolak')) return 'bg-red-50 text-red-700 border-red-300';
+    if (s.includes('menunggu')) return 'bg-amber-50 text-amber-700 border-amber-300';
+    return 'bg-gray-100 text-gray-700 border-gray-300'; // Belum Banding / Evaluasi Baru
+  };
 
   // --- FUNGSI TOGGLE BINTANG "WINNING MENTAHAN" ---
   const toggleWinningProduct = (id) => {
@@ -117,7 +140,6 @@ export default function App() {
     if (!jumlah || jumlah <= 0) return;
     const cleanName = labelProdukAtauTanggal.toLowerCase().replace(/[^a-z0-9]/g, '_');
     
-    // Membuat simulasi daftar file sesuai jumlah angka yang diklik (Nantinya otomatis dari sheet FILE_ASSET / Klip_Vidio / Publish)
     const generatedFiles = Array.from({ length: jumlah }, (_, i) => {
       const num = String(i + 1).padStart(3, '0');
       if (kategori === 'Mentahan (Raw Asset)') {
@@ -159,44 +181,161 @@ export default function App() {
     });
   };
 
-  // --- FUNGSI UPLOAD BUKTI SCREENSHOT PELANGGARAN ---
-  const handleScreenshotUpload = (e) => {
+  // --- FUNGSI UPLOAD BUKTI SCREENSHOT PELANGGARAN (TEGURAN AWAL & HASIL BANDING) ---
+  const handleScreenshotUpload = (e, fieldType = 'awal') => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onloadend = () => {
-      setNewViolation(prev => ({
-        ...prev,
-        screenshot: reader.result,
-        screenshotName: file.name
-      }));
+      if (fieldType === 'banding') {
+        setNewViolation(prev => ({
+          ...prev,
+          screenshotBanding: reader.result,
+          screenshotBandingName: file.name
+        }));
+      } else {
+        setNewViolation(prev => ({
+          ...prev,
+          screenshot: reader.result,
+          screenshotName: file.name
+        }));
+      }
     };
     reader.readAsDataURL(file);
   };
 
-// --- FUNGSI TAMBAH PELANGGARAN (SIMPAN PERMANEN KE GOOGLE SHEETS) ---
+  // --- FUNGSI KLIK TOMBOL EDIT PADA BARIS PELANGGARAN ---
+  const handleStartEditViolation = (item) => {
+    setEditingViolationId(item.id);
+    setNewViolation({
+      akun: item.akun || '',
+      produk: item.produk || '',
+      jenis: item.jenis || '',
+      status: item.status || 'Belum Banding',
+      catatan: item.catatan === '-' ? '' : (item.catatan || ''),
+      linkVideo: item.linkVideo || '',
+      screenshot: item.screenshot || null,
+      screenshotName: item.screenshot ? 'SS Teguran Tersimpan' : '',
+      screenshotBanding: item.screenshotBanding || null,
+      screenshotBandingName: item.screenshotBanding ? 'SS Banding Tersimpan' : ''
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEditViolation = () => {
+    setEditingViolationId(null);
+    setNewViolation(EMPTY_VIOLATION_FORM);
+  };
+
+  // --- FUNGSI UBAH STATUS LANGSUNG DARI TABEL ---
+  const handleQuickStatusChange = async (id, newStatus) => {
+    const targetItem = violations.find(v => v.id === id);
+    if (!targetItem) return;
+
+    const updatedItem = { ...targetItem, status: newStatus };
+    setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
+
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'update_violation',
+          data: updatedItem
+        })
+      });
+    } catch (err) {
+      console.error("Gagal mengupdate status ke Sheets", err);
+    }
+  };
+
+  // --- FUNGSI UPLOAD SS BANDING LANGSUNG DARI TABEL ---
+  const handleQuickUploadBandingSS = (e, id) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64Img = reader.result;
+      const targetItem = violations.find(v => v.id === id);
+      if (!targetItem) return;
+
+      const updatedItem = { ...targetItem, screenshotBanding: base64Img };
+      setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
+
+      try {
+        await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'update_violation',
+            data: updatedItem
+          })
+        });
+      } catch (err) {
+        console.error("Gagal menyimpan SS Banding ke Sheets", err);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // --- FUNGSI SIMPAN BARU ATAU SIMPAN PERUBAHAN EDIT PELANGGARAN ---
   const handleAddViolation = async (e) => {
     e.preventDefault();
     if (!newViolation.akun || !newViolation.produk || !newViolation.jenis) return;
+
+    // MODE EDIT DATA YANG SUDAH ADA
+    if (editingViolationId !== null) {
+      const existingItem = violations.find(v => v.id === editingViolationId);
+      const updatedEntry = {
+        id: editingViolationId,
+        tanggal: existingItem?.tanggal || new Date().toLocaleDateString('id-ID'),
+        akun: newViolation.akun,
+        produk: newViolation.produk,
+        jenis: newViolation.jenis,
+        status: newViolation.status || 'Belum Banding',
+        linkVideo: newViolation.linkVideo || '',
+        screenshot: newViolation.screenshot || null,
+        screenshotBanding: newViolation.screenshotBanding || null,
+        catatan: newViolation.catatan || '-'
+      };
+
+      setViolations(prev => prev.map(v => v.id === editingViolationId ? updatedEntry : v));
+      setEditingViolationId(null);
+      setNewViolation(EMPTY_VIOLATION_FORM);
+
+      try {
+        await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'update_violation',
+            data: updatedEntry
+          })
+        });
+      } catch (err) {
+        alert("Perubahan tampil di layar, namun gagal tersimpan ke Google Sheets.");
+      }
+      return;
+    }
+
+    // MODE TAMBAH DATA BARU
     const today = new Date().toLocaleDateString('id-ID');
-    
     const newEntry = {
       id: Date.now(),
       tanggal: today,
       akun: newViolation.akun,
       produk: newViolation.produk,
       jenis: newViolation.jenis,
-      status: 'Evaluasi Baru',
+      status: newViolation.status || 'Belum Banding',
       linkVideo: newViolation.linkVideo || '',
       screenshot: newViolation.screenshot || null,
+      screenshotBanding: newViolation.screenshotBanding || null,
       catatan: newViolation.catatan || '-'
     };
 
-    // Tampilkan langsung di tabel web
     setViolations([newEntry, ...violations]);
-    setNewViolation({ akun: '', produk: '', jenis: '', catatan: '', linkVideo: '', screenshot: null, screenshotName: '' });
+    setNewViolation(EMPTY_VIOLATION_FORM);
 
-    // Kirim permanen ke sheet Data_Pelanggaran di Google Sheets
     try {
       await fetch(API_URL, {
         method: 'POST',
@@ -210,6 +349,7 @@ export default function App() {
       alert("Gagal menyimpan ke Google Sheets, periksa koneksi internet Anda.");
     }
   };
+
   // --- FUNGSI ASISTEN AI PEMBACA DATA WEB & GENERATOR MATERI PPT/PDF ---
   const askAiAboutDashboard = async (customPrompt = null) => {
     const queryText = customPrompt || aiQuestion;
@@ -218,16 +358,15 @@ export default function App() {
     setIsAiThinking(true);
     setAiResponse('');
 
-    // Ringkasan konteks data real-time yang sedang tampil di layar web
     const dashboardContext = `
-       Konteks Data Web PromoOps Studio Saat Ini:
+      Konteks Data Web PromoOps Studio Saat Ini:
       - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim ${rekapTim}.
       - Total Mentahan (Raw): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
       - Total Video Final (Selesai Edit): ${totalFinalRekap} klip.
       - Total Upload (Publisher 5 Akun): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
       - Daftar Produk Teratas: ${filteredProducts.map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'})`).join('; ')}.
       - Rekap Harian: ${filteredDaily.map(d => `${d.labelTanggal} (Raw:${d.mentahan}, Edit:${d.diedit}, Upload:${d.upload}/${d.target})`).join('; ')}.
-      - Total Pelanggaran Tercatat: ${violations.length} kasus (${violations.map(v => `${v.produk} - ${v.jenis}`).join(', ')}).
+      - Total Pelanggaran Tercatat: ${violations.length} kasus (${violations.map(v => `${v.produk} [${v.status}] - ${v.jenis}`).join(', ')}).
     `;
 
     const fullPrompt = `
@@ -242,7 +381,6 @@ export default function App() {
 
     try {
       if (!GEMINI_API_KEY || GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
-        // Fallback cerdas otomatis jika API Key masih terkendala cache di Vercel
         setTimeout(() => {
           setAiResponse(
             `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
@@ -254,7 +392,7 @@ export default function App() {
             `* Produk dengan kontribusi tertinggi saat ini dipimpin oleh **${filteredProducts[0]?.produk || '-'}** (${filteredProducts[0]?.mentahan || 0} mentahan, ${filteredProducts[0]?.videoFinal || 0} edit, ${filteredProducts[0]?.upload || 0} upload).\n` +
             `* Produk yang ditandai sebagai Mentahan Bagus (⭐) bulan ini: **${filteredProducts.filter(p => p.isWinning).map(p => p.produk).join(', ') || 'Belum ada'}**.\n\n` +
             `**3. Evaluasi Harian & Mitigasi Pelanggaran**\n` +
-            `* Terdapat **${violations.length} catatan pelanggaran** yang sedang dipantau (${violations.map(v => v.produk).join(', ')}). Tim editor dan publisher diinstruksikan menyesuaikan visual hook agar akun tetap aman.`
+            `* Terdapat **${violations.length} catatan pelanggaran** yang sedang dipantau (${violations.map(v => `${v.produk}: ${v.status}`).join(', ')}).`
           );
           setIsAiThinking(false);
         }, 800);
@@ -274,7 +412,6 @@ export default function App() {
       if (result.candidates && result.candidates.length > 0) {
         setAiResponse(result.candidates[0].content.parts[0].text);
       } else {
-        // Fallback jika API gagal merespons
         setAiResponse(
           `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
           `* **Total Mentahan:** ${totalMentahanRekap} file (${totalBelumDipakaiRekap} siap pakai).\n` +
@@ -370,7 +507,7 @@ export default function App() {
     return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
   };
 
-const fetchData = async () => {
+  const fetchData = async () => {
     setLoading(true);
     try {
       const response = await fetch(API_URL);
@@ -542,7 +679,6 @@ const fetchData = async () => {
             </div>
 
             <div className="p-5 overflow-y-auto flex-1 space-y-4 bg-gray-50">
-              {/* Tombol Cepat (Quick Prompts) */}
               <div className="flex flex-wrap gap-2">
                 <button 
                   onClick={() => askAiAboutDashboard("Buatkan draft poin-poin slide PPT laporan bulanan dari data web saat ini")}
@@ -564,7 +700,6 @@ const fetchData = async () => {
                 </button>
               </div>
 
-              {/* Kotak Jawaban AI */}
               <div className="bg-white p-4 rounded-xl border border-gray-200 min-h-[220px] text-sm">
                 {isAiThinking ? (
                   <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -609,16 +744,16 @@ const fetchData = async () => {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 3: PREVIEW BUKTI SCREENSHOT PELANGGARAN                             */}
+      {/* MODAL 3: PREVIEW BUKTI SCREENSHOT PELANGGARAN & HASIL BANDING             */}
       {/* ========================================================================= */}
       {previewImage && (
         <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden" onClick={() => setPreviewImage(null)}>
           <div className="bg-white p-3 rounded-2xl max-w-lg w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex justify-between items-center pb-2 mb-2 border-b">
-              <h4 className="font-bold text-sm text-gray-800">Bukti Screenshot Pelanggaran</h4>
+              <h4 className="font-bold text-sm text-gray-800">{previewImage.title || 'Bukti Screenshot'}</h4>
               <button onClick={() => setPreviewImage(null)} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
             </div>
-            <img src={previewImage} alt="Bukti Pelanggaran" className="w-full h-auto max-h-[75vh] object-contain rounded-lg" />
+            <img src={previewImage.url} alt="Bukti Screenshot" className="w-full h-auto max-h-[75vh] object-contain rounded-lg" />
           </div>
         </div>
       )}
@@ -745,7 +880,6 @@ const fetchData = async () => {
             </div>
           </div>
 
-          {/* 1. FILTER TERPADU (BULAN, HARI, PRODUK, TIM) */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 print:hidden">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Bulan</label>
@@ -793,7 +927,6 @@ const fetchData = async () => {
             </div>
           </div>
 
-          {/* 2. TIGA KARTU TOTAL SESUAI FILTER (BISA DIKLIK) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div 
               onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Mentahan (Raw Asset)', totalMentahanRekap, rekapTim)}
@@ -832,10 +965,7 @@ const fetchData = async () => {
             </div>
           </div>
 
-          {/* 3. DUA TABEL UTAMA: REKAP PER PRODUK & TRACKING HARIAN */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            
-            {/* TABEL KIRI: REKAP PER PRODUK (ANGKA BISA DIKLIK) */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-gray-50">
                 <div>
@@ -884,7 +1014,6 @@ const fetchData = async () => {
                             <button 
                               onClick={() => openFileDrillDown(item.produk, 'Mentahan (Raw Asset)', item.mentahan, item.tim)}
                               className="font-black text-blue-600 hover:bg-blue-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
-                              title="Klik untuk lihat daftar file mentahan"
                             >
                               {item.mentahan}
                             </button>
@@ -893,7 +1022,6 @@ const fetchData = async () => {
                             <button 
                               onClick={() => openFileDrillDown(item.produk, 'Video Final (Production)', item.videoFinal, 'Rahmat Pajari')}
                               className="font-black text-amber-600 hover:bg-amber-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
-                              title="Klik untuk lihat daftar video final"
                             >
                               {item.videoFinal}
                             </button>
@@ -902,7 +1030,6 @@ const fetchData = async () => {
                             <button 
                               onClick={() => openFileDrillDown(item.produk, 'Video Terupload (Publisher)', item.upload, item.tim)}
                               className="font-black text-emerald-600 hover:bg-emerald-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
-                              title="Klik untuk lihat daftar link upload"
                             >
                               {item.upload}
                             </button>
@@ -915,7 +1042,6 @@ const fetchData = async () => {
               </div>
             </div>
 
-            {/* TABEL KANAN: TRACKING HARIAN (ANGKA JUGA BISA DIKLIK) */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
                 <div>
@@ -1162,7 +1288,7 @@ const fetchData = async () => {
       )}
 
       {/* ========================================================================= */}
-      {/* HALAMAN 3: EVALUASI VIDEO PELANGGARAN (DENGAN LINK & BUKTI SCREENSHOT)    */}
+      {/* HALAMAN 3: EVALUASI VIDEO PELANGGARAN (DENGAN EDIT, STATUS & 2 BUKTI SS)  */}
       {/* ========================================================================= */}
       {activeMenu === 'pelanggaran' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
@@ -1170,15 +1296,27 @@ const fetchData = async () => {
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
-            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, lampirkan link video serta bukti screenshot untuk evaluasi tim editor & publisher.</p>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, pantau status banding, dan lampirkan bukti SS teguran maupun SS hasil banding.</p>
           </div>
 
-          {/* FORM TAMBAH PELANGGARAN BARU */}
-          <form onSubmit={handleAddViolation} className="bg-white p-5 rounded-2xl shadow-sm border border-red-200 mb-6 print:hidden">
-            <h3 className="font-bold text-gray-900 text-sm mb-3 flex items-center gap-2">
-              <Plus className="w-4 h-4 text-red-600" /> Catat Pelanggaran Baru
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+          {/* FORM TAMBAH / EDIT PELANGGARAN */}
+          <form onSubmit={handleAddViolation} className={`bg-white p-5 rounded-2xl shadow-sm border mb-6 print:hidden transition-colors ${editingViolationId !== null ? 'border-amber-400 ring-2 ring-amber-100' : 'border-red-200'}`}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
+                {editingViolationId !== null ? (
+                  <><Edit3 className="w-4 h-4 text-amber-600" /> Mode Edit Data Pelanggaran</>
+                ) : (
+                  <><Plus className="w-4 h-4 text-red-600" /> Catat Pelanggaran Baru</>
+                )}
+              </h3>
+              {editingViolationId !== null && (
+                <span className="text-xs font-bold bg-amber-50 text-amber-800 px-2.5 py-1 rounded-md border border-amber-200">
+                  Sedang Mengedit: {newViolation.produk}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
               <select 
                 value={newViolation.akun} 
                 onChange={(e) => setNewViolation({...newViolation, akun: e.target.value})}
@@ -1215,6 +1353,18 @@ const fetchData = async () => {
                 <option value="Audio / Musik Hak Cipta">Audio / Musik Hak Cipta</option>
               </select>
 
+              {/* PILIHAN STATUS BANDING */}
+              <select 
+                value={newViolation.status}
+                onChange={(e) => setNewViolation({...newViolation, status: e.target.value})}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+              >
+                <option value="Belum Banding">⏳ Status: Belum Banding</option>
+                <option value="Menunggu Banding">🕒 Status: Menunggu Banding</option>
+                <option value="Banding Diterima">✅ Status: Banding Diterima</option>
+                <option value="Banding Ditolak">❌ Status: Banding Ditolak</option>
+              </select>
+
               <input 
                 type="url" 
                 placeholder="Link Video TikTok (https://tiktok.com/...)..."
@@ -1223,13 +1373,22 @@ const fetchData = async () => {
                 className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
               />
 
-              {/* Input Upload Bukti Screenshot */}
+              {/* Input Upload Bukti Screenshot 1: Teguran Awal */}
               <label className="bg-gray-50 border border-dashed border-gray-300 hover:border-red-400 text-gray-700 text-sm rounded-lg p-2.5 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors">
                 <ImageIcon className="w-4 h-4 text-red-600 shrink-0" />
                 <span className="truncate text-xs">
-                  {newViolation.screenshotName ? `📷 ${newViolation.screenshotName}` : 'Upload Bukti Screenshot...'}
+                  {newViolation.screenshotName ? `📷 ${newViolation.screenshotName}` : '1. Upload SS Teguran...'}
                 </span>
-                <input type="file" accept="image/*" onChange={handleScreenshotUpload} className="hidden" />
+                <input type="file" accept="image/*" onChange={(e) => handleScreenshotUpload(e, 'awal')} className="hidden" />
+              </label>
+
+              {/* Input Upload Bukti Screenshot 2: Hasil Banding */}
+              <label className="bg-gray-50 border border-dashed border-gray-300 hover:border-emerald-400 text-gray-700 text-sm rounded-lg p-2.5 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span className="truncate text-xs">
+                  {newViolation.screenshotBandingName ? `📷 ${newViolation.screenshotBandingName}` : '2. Upload SS Hasil Banding...'}
+                </span>
+                <input type="file" accept="image/*" onChange={(e) => handleScreenshotUpload(e, 'banding')} className="hidden" />
               </label>
 
               <input 
@@ -1240,28 +1399,41 @@ const fetchData = async () => {
                 className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
               />
             </div>
-            <button type="submit" className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm">
-              Simpan Data Pelanggaran
-            </button>
+
+            <div className="flex items-center gap-2">
+              <button type="submit" className={`${editingViolationId !== null ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm`}>
+                {editingViolationId !== null ? 'Simpan Perubahan Edit' : 'Simpan Data Pelanggaran'}
+              </button>
+              {editingViolationId !== null && (
+                <button 
+                  type="button" 
+                  onClick={handleCancelEditViolation}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs md:text-sm px-4 py-2.5 rounded-xl transition-colors"
+                >
+                  Batal Edit
+                </button>
+              )}
+            </div>
           </form>
 
           {/* TABEL DAFTAR PELANGGARAN */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm min-w-[850px]">
+              <table className="w-full text-left border-collapse text-sm min-w-[950px]">
                 <thead>
                   <tr className="bg-red-50/60 text-red-900 border-b border-red-100 text-xs uppercase">
                     <th className="py-3.5 px-4 font-bold">Tanggal & Akun</th>
                     <th className="py-3.5 px-4 font-bold">Produk & Link Video</th>
                     <th className="py-3.5 px-4 font-bold">Jenis Pelanggaran</th>
-                    <th className="py-3.5 px-4 font-bold text-center">Bukti SS</th>
-                    <th className="py-3.5 px-4 font-bold">Status</th>
+                    <th className="py-3.5 px-4 font-bold text-center">Bukti SS (Teguran & Banding)</th>
+                    <th className="py-3.5 px-4 font-bold">Status Banding</th>
                     <th className="py-3.5 px-4 font-bold">Evaluasi / Tindakan</th>
+                    <th className="py-3.5 px-4 font-bold text-center print:hidden">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {violations.map((v) => (
-                    <tr key={v.id} className="hover:bg-gray-50">
+                    <tr key={v.id} className={`hover:bg-gray-50 transition-colors ${editingViolationId === v.id ? 'bg-amber-50/40' : ''}`}>
                       <td className="py-3.5 px-4">
                         <p className="font-bold text-gray-900">{v.akun}</p>
                         <span className="text-xs text-gray-500">{v.tanggal}</span>
@@ -1281,20 +1453,63 @@ const fetchData = async () => {
                           {v.jenis}
                         </span>
                       </td>
+
+                      {/* KOLOM 2 BUKTI SCREENSHOT: TEGURAN & HASIL BANDING */}
                       <td className="py-3.5 px-4 text-center">
-                        {v.screenshot ? (
-                          <button 
-                            onClick={() => setPreviewImage(v.screenshot)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-md text-xs font-bold border border-gray-300 transition-colors"
-                          >
-                            <ImageIcon className="w-3.5 h-3.5 text-red-600" /> Lihat SS
-                          </button>
-                        ) : (
-                          <span className="text-xs text-gray-400">-</span>
-                        )}
+                        <div className="flex flex-col items-center justify-center gap-1.5">
+                          {v.screenshot ? (
+                            <button 
+                              onClick={() => setPreviewImage({ url: v.screenshot, title: `Bukti Teguran Awal — ${v.produk}` })}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-800 rounded-md text-xs font-bold border border-red-200 transition-colors w-max"
+                            >
+                              <ImageIcon className="w-3.5 h-3.5 text-red-600" /> SS Teguran
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-gray-400">Tanpa SS Teguran</span>
+                          )}
+
+                          {v.screenshotBanding ? (
+                            <button 
+                              onClick={() => setPreviewImage({ url: v.screenshotBanding, title: `Bukti Hasil Banding — ${v.produk}` })}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-md text-xs font-bold border border-emerald-200 transition-colors w-max"
+                            >
+                              <ImageIcon className="w-3.5 h-3.5 text-emerald-600" /> SS Banding
+                            </button>
+                          ) : (
+                            <label className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded text-[11px] font-semibold border border-dashed border-gray-300 cursor-pointer print:hidden">
+                              <Plus className="w-3 h-3 text-emerald-600" /> Tambah SS Banding
+                              <input type="file" accept="image/*" onChange={(e) => handleQuickUploadBandingSS(e, v.id)} className="hidden" />
+                            </label>
+                          )}
+                        </div>
                       </td>
-                      <td className="py-3.5 px-4 font-semibold text-gray-700">{v.status}</td>
+
+                      {/* KOLOM DROPDOWN STATUS BANDING LANGSUNG */}
+                      <td className="py-3.5 px-4">
+                        <select
+                          value={v.status || 'Belum Banding'}
+                          onChange={(e) => handleQuickStatusChange(v.id, e.target.value)}
+                          className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none ${getViolationStatusStyle(v.status)}`}
+                        >
+                          <option value="Belum Banding">Belum Banding</option>
+                          <option value="Menunggu Banding">Menunggu Banding</option>
+                          <option value="Banding Diterima">Banding Diterima</option>
+                          <option value="Banding Ditolak">Banding Ditolak</option>
+                        </select>
+                      </td>
+
                       <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
+
+                      {/* KOLOM TOMBOL EDIT BARIS */}
+                      <td className="py-3.5 px-4 text-center print:hidden">
+                        <button
+                          onClick={() => handleStartEditViolation(v)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
+                          title="Edit baris pelanggaran ini"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" /> Edit
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
