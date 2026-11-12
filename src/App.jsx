@@ -174,28 +174,42 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
-  // --- FUNGSI TAMBAH PELANGGARAN ---
-  const handleAddViolation = (e) => {
+// --- FUNGSI TAMBAH PELANGGARAN (SIMPAN PERMANEN KE GOOGLE SHEETS) ---
+  const handleAddViolation = async (e) => {
     e.preventDefault();
     if (!newViolation.akun || !newViolation.produk || !newViolation.jenis) return;
     const today = new Date().toLocaleDateString('id-ID');
-    setViolations([
-      {
-        id: Date.now(),
-        tanggal: today,
-        akun: newViolation.akun,
-        produk: newViolation.produk,
-        jenis: newViolation.jenis,
-        status: 'Evaluasi Baru',
-        linkVideo: newViolation.linkVideo || '',
-        screenshot: newViolation.screenshot || null,
-        catatan: newViolation.catatan || '-'
-      },
-      ...violations
-    ]);
-    setNewViolation({ akun: '', produk: '', jenis: '', catatan: '', linkVideo: '', screenshot: null, screenshotName: '' });
-  };
+    
+    const newEntry = {
+      id: Date.now(),
+      tanggal: today,
+      akun: newViolation.akun,
+      produk: newViolation.produk,
+      jenis: newViolation.jenis,
+      status: 'Evaluasi Baru',
+      linkVideo: newViolation.linkVideo || '',
+      screenshot: newViolation.screenshot || null,
+      catatan: newViolation.catatan || '-'
+    };
 
+    // Tampilkan langsung di tabel web
+    setViolations([newEntry, ...violations]);
+    setNewViolation({ akun: '', produk: '', jenis: '', catatan: '', linkVideo: '', screenshot: null, screenshotName: '' });
+
+    // Kirim permanen ke sheet Data_Pelanggaran di Google Sheets
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'save_violation',
+          data: newEntry
+        })
+      });
+    } catch (err) {
+      alert("Gagal menyimpan ke Google Sheets, periksa koneksi internet Anda.");
+    }
+  };
   // --- FUNGSI ASISTEN AI PEMBACA DATA WEB & GENERATOR MATERI PPT/PDF ---
   const askAiAboutDashboard = async (customPrompt = null) => {
     const queryText = customPrompt || aiQuestion;
@@ -356,7 +370,7 @@ export default function App() {
     return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
   };
 
-  const fetchData = async () => {
+const fetchData = async () => {
     setLoading(true);
     try {
       const response = await fetch(API_URL);
@@ -366,6 +380,11 @@ export default function App() {
           item.Link_Postingan && item.Link_Postingan.includes("tiktok.com") && item.Induk_Barang && item.Induk_Barang.trim() !== ""
         );
         setData(validData.reverse());
+
+        // Jika di Google Sheets sudah ada isi Data_Pelanggaran, tampilkan ke tabel web
+        if (result.violations && result.violations.length > 0) {
+          setViolations(result.violations);
+        }
       }
     } catch (err) {
       setError("Terjadi kesalahan jaringan.");
