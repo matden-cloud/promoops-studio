@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
-  LayoutDashboard, BarChart2, Database,
+  LayoutDashboard, BarChart2,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer
+  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2
 } from 'lucide-react';
 
 // --- DATA SIMULASI UNTUK REKAP PIPELINE ---
@@ -37,8 +37,7 @@ const INITIAL_VIOLATIONS = [
     jenis: 'Produk Berbahaya / Tajam', 
     status: 'Banding Diterima', 
     linkVideo: 'https://www.tiktok.com/@tiktok/video/7123456789',
-    screenshot: null,
-    screenshotBanding: null,
+    screenshots: [],
     catatan: 'Hindari memperlihatkan mata pisau berputar terlalu dekat ke kamera.' 
   },
   { 
@@ -49,10 +48,19 @@ const INITIAL_VIOLATIONS = [
     jenis: 'Klaim Berlebihan / Misleading', 
     status: 'Menunggu Banding', 
     linkVideo: 'https://www.tiktok.com/@tiktok/video/7987654321',
-    screenshot: null,
-    screenshotBanding: null,
+    screenshots: [],
     catatan: 'Ganti teks klaim instan 1 detik di hook awal.' 
   }
+];
+
+const DEFAULT_VIOLATION_TYPES = [
+  "Produk Berbahaya / Tajam",
+  "Konten Tidak Orisinal / Reupload",
+  "Klaim Berlebihan / Misleading",
+  "Audio / Musik Hak Cipta",
+  "Mengarahkan Transaksi di Luar TikTok",
+  "Kualitas Video Buram / Statis",
+  "Produk Tidak Sesuai Keranjang Kuning"
 ];
 
 const EMPTY_VIOLATION_FORM = {
@@ -62,10 +70,7 @@ const EMPTY_VIOLATION_FORM = {
   status: 'Belum Banding',
   catatan: '', 
   linkVideo: '', 
-  screenshot: null, 
-  screenshotName: '',
-  screenshotBanding: null,
-  screenshotBandingName: ''
+  screenshots: [] // Array berisi { id, label, url }
 };
 
 export default function App() {
@@ -93,7 +98,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState('mentahan');
   const [onlyWinning, setOnlyWinning] = useState(false);
 
-  // --- STATE DRILL-DOWN MODAL DAFTAR FILE (KLIK ANGKA 16, 12, 10) ---
+  // --- STATE DRILL-DOWN MODAL DAFTAR FILE ---
   const [drillDownModal, setDrillDownModal] = useState(null);
 
   // --- STATE ASISTEN AI PEMBACA WEB & PEMBUAT LAPORAN PPT/PDF ---
@@ -102,11 +107,14 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
-  // --- STATE HALAMAN PELANGGARAN (DENGAN EDIT, STATUS & 2 SCREENSHOT) ---
+  // --- STATE HALAMAN PELANGGARAN (MULTI-SS & CUSTOM JENIS PELANGGARAN) ---
   const [violations, setViolations] = useState(INITIAL_VIOLATIONS);
   const [newViolation, setNewViolation] = useState(EMPTY_VIOLATION_FORM);
   const [editingViolationId, setEditingViolationId] = useState(null);
-  const [previewImage, setPreviewImage] = useState(null); // { url, title }
+  const [violationTypes, setViolationTypes] = useState(DEFAULT_VIOLATION_TYPES);
+  const [isCustomJenis, setIsCustomJenis] = useState(false);
+  const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
+  const [previewGallery, setPreviewGallery] = useState(null); // { produk, images: [], activeIndex: 0 }
 
   // ⚠️ API KEY & URL
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -125,7 +133,108 @@ export default function App() {
     if (s.includes('diterima')) return 'bg-emerald-50 text-emerald-700 border-emerald-300';
     if (s.includes('ditolak')) return 'bg-red-50 text-red-700 border-red-300';
     if (s.includes('menunggu')) return 'bg-amber-50 text-amber-700 border-amber-300';
-    return 'bg-gray-100 text-gray-700 border-gray-300'; // Belum Banding / Evaluasi Baru
+    return 'bg-gray-100 text-gray-700 border-gray-300';
+  };
+
+  // --- FUNGSI NORMALISASI ARRAY SCREENSHOT ---
+  const getViolationScreenshots = (v) => {
+    if (Array.isArray(v.screenshots)) return v.screenshots;
+    const list = [];
+    if (v.screenshot) list.push({ id: 'ss_1', label: 'SS Teguran', url: v.screenshot });
+    if (v.screenshotBanding) list.push({ id: 'ss_2', label: 'SS Banding', url: v.screenshotBanding });
+    return list;
+  };
+
+  // --- FUNGSI KOMPRESI GAMBAR OTOMATIS AGAR MUAT BANYAK DI GOOGLE SHEETS ---
+  const compressImage = (file, maxWidth = 650, quality = 0.6) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target.result;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const scale = maxWidth / img.width;
+          canvas.width = scale < 1 ? maxWidth : img.width;
+          canvas.height = scale < 1 ? img.height * scale : img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+      };
+    });
+  };
+
+  // --- FUNGSI UPLOAD BANYAK SCREENSHOT SEKALIGUS KE FORM ---
+  const handleMultipleScreenshots = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    const newImages = [];
+    for (let i = 0; i < files.length; i++) {
+      const compressedBase64 = await compressImage(files[i]);
+      newImages.push({
+        id: `${Date.now()}_${i}`,
+        label: files.length > 1 ? `${ssLabelInput} ${i + 1}` : ssLabelInput,
+        url: compressedBase64
+      });
+    }
+
+    setNewViolation(prev => ({
+      ...prev,
+      screenshots: [...(prev.screenshots || []), ...newImages]
+    }));
+    e.target.value = '';
+  };
+
+  // --- FUNGSI HAPUS 1 SCREENSHOT DARI FORM ---
+  const handleRemoveFormScreenshot = (ssId) => {
+    setNewViolation(prev => ({
+      ...prev,
+      screenshots: (prev.screenshots || []).filter(item => item.id !== ssId)
+    }));
+  };
+
+  // --- FUNGSI TAMBAH BANYAK SS LANGSUNG DARI BARIS TABEL ---
+  const handleQuickAddScreenshotsToRow = async (e, rowId) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    const targetItem = violations.find(v => v.id === rowId);
+    if (!targetItem) return;
+
+    const existingSS = getViolationScreenshots(targetItem);
+    const addedSS = [];
+    for (let i = 0; i < files.length; i++) {
+      const compressedBase64 = await compressImage(files[i]);
+      addedSS.push({
+        id: `${Date.now()}_${i}`,
+        label: `SS Tambahan ${existingSS.length + i + 1}`,
+        url: compressedBase64
+      });
+    }
+
+    const updatedItem = {
+      ...targetItem,
+      screenshots: [...existingSS, ...addedSS]
+    };
+
+    setViolations(prev => prev.map(v => v.id === rowId ? updatedItem : v));
+    e.target.value = '';
+
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'update_violation',
+          data: updatedItem
+        })
+      });
+    } catch (err) {
+      console.error("Gagal menambah SS ke Google Sheets", err);
+    }
   };
 
   // --- FUNGSI TOGGLE BINTANG "WINNING MENTAHAN" ---
@@ -181,32 +290,13 @@ export default function App() {
     });
   };
 
-  // --- FUNGSI UPLOAD BUKTI SCREENSHOT PELANGGARAN (TEGURAN AWAL & HASIL BANDING) ---
-  const handleScreenshotUpload = (e, fieldType = 'awal') => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      if (fieldType === 'banding') {
-        setNewViolation(prev => ({
-          ...prev,
-          screenshotBanding: reader.result,
-          screenshotBandingName: file.name
-        }));
-      } else {
-        setNewViolation(prev => ({
-          ...prev,
-          screenshot: reader.result,
-          screenshotName: file.name
-        }));
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   // --- FUNGSI KLIK TOMBOL EDIT PADA BARIS PELANGGARAN ---
   const handleStartEditViolation = (item) => {
     setEditingViolationId(item.id);
+    if (item.jenis && !violationTypes.includes(item.jenis)) {
+      setViolationTypes(prev => [...prev, item.jenis]);
+    }
+    setIsCustomJenis(false);
     setNewViolation({
       akun: item.akun || '',
       produk: item.produk || '',
@@ -214,16 +304,14 @@ export default function App() {
       status: item.status || 'Belum Banding',
       catatan: item.catatan === '-' ? '' : (item.catatan || ''),
       linkVideo: item.linkVideo || '',
-      screenshot: item.screenshot || null,
-      screenshotName: item.screenshot ? 'SS Teguran Tersimpan' : '',
-      screenshotBanding: item.screenshotBanding || null,
-      screenshotBandingName: item.screenshotBanding ? 'SS Banding Tersimpan' : ''
+      screenshots: getViolationScreenshots(item)
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleCancelEditViolation = () => {
     setEditingViolationId(null);
+    setIsCustomJenis(false);
     setNewViolation(EMPTY_VIOLATION_FORM);
   };
 
@@ -232,7 +320,7 @@ export default function App() {
     const targetItem = violations.find(v => v.id === id);
     if (!targetItem) return;
 
-    const updatedItem = { ...targetItem, status: newStatus };
+    const updatedItem = { ...targetItem, status: newStatus, screenshots: getViolationScreenshots(targetItem) };
     setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
 
     try {
@@ -249,39 +337,17 @@ export default function App() {
     }
   };
 
-  // --- FUNGSI UPLOAD SS BANDING LANGSUNG DARI TABEL ---
-  const handleQuickUploadBandingSS = (e, id) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64Img = reader.result;
-      const targetItem = violations.find(v => v.id === id);
-      if (!targetItem) return;
-
-      const updatedItem = { ...targetItem, screenshotBanding: base64Img };
-      setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
-
-      try {
-        await fetch(API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'update_violation',
-            data: updatedItem
-          })
-        });
-      } catch (err) {
-        console.error("Gagal menyimpan SS Banding ke Sheets", err);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
   // --- FUNGSI SIMPAN BARU ATAU SIMPAN PERUBAHAN EDIT PELANGGARAN ---
   const handleAddViolation = async (e) => {
     e.preventDefault();
     if (!newViolation.akun || !newViolation.produk || !newViolation.jenis) return;
+
+    // Jika user mengetik jenis pelanggaran baru, otomatis simpan ke daftar dropdown
+    const cleanJenis = newViolation.jenis.trim();
+    if (!violationTypes.includes(cleanJenis)) {
+      setViolationTypes(prev => [...prev, cleanJenis]);
+    }
+    setIsCustomJenis(false);
 
     // MODE EDIT DATA YANG SUDAH ADA
     if (editingViolationId !== null) {
@@ -291,11 +357,10 @@ export default function App() {
         tanggal: existingItem?.tanggal || new Date().toLocaleDateString('id-ID'),
         akun: newViolation.akun,
         produk: newViolation.produk,
-        jenis: newViolation.jenis,
+        jenis: cleanJenis,
         status: newViolation.status || 'Belum Banding',
         linkVideo: newViolation.linkVideo || '',
-        screenshot: newViolation.screenshot || null,
-        screenshotBanding: newViolation.screenshotBanding || null,
+        screenshots: newViolation.screenshots || [],
         catatan: newViolation.catatan || '-'
       };
 
@@ -325,11 +390,10 @@ export default function App() {
       tanggal: today,
       akun: newViolation.akun,
       produk: newViolation.produk,
-      jenis: newViolation.jenis,
+      jenis: cleanJenis,
       status: newViolation.status || 'Belum Banding',
       linkVideo: newViolation.linkVideo || '',
-      screenshot: newViolation.screenshot || null,
-      screenshotBanding: newViolation.screenshotBanding || null,
+      screenshots: newViolation.screenshots || [],
       catatan: newViolation.catatan || '-'
     };
 
@@ -518,9 +582,11 @@ export default function App() {
         );
         setData(validData.reverse());
 
-        // Jika di Google Sheets sudah ada isi Data_Pelanggaran, tampilkan ke tabel web
         if (result.violations && result.violations.length > 0) {
           setViolations(result.violations);
+          // Kumpulkan juga jenis pelanggaran baru yang pernah disimpan di Google Sheets
+          const customTypesFromSheet = result.violations.map(v => v.jenis).filter(Boolean);
+          setViolationTypes(prev => [...new Set([...prev, ...customTypesFromSheet])]);
         }
       }
     } catch (err) {
@@ -744,16 +810,63 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 3: PREVIEW BUKTI SCREENSHOT PELANGGARAN & HASIL BANDING             */}
+      {/* MODAL 3: GALERI PREVIEW MULTI-SCREENSHOT PELANGGARAN                      */}
       {/* ========================================================================= */}
-      {previewImage && (
-        <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden" onClick={() => setPreviewImage(null)}>
-          <div className="bg-white p-3 rounded-2xl max-w-lg w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center pb-2 mb-2 border-b">
-              <h4 className="font-bold text-sm text-gray-800">{previewImage.title || 'Bukti Screenshot'}</h4>
-              <button onClick={() => setPreviewImage(null)} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
+      {previewGallery && (
+        <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden" onClick={() => setPreviewGallery(null)}>
+          <div className="bg-white p-4 rounded-2xl max-w-2xl w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center pb-3 mb-3 border-b">
+              <div>
+                <h4 className="font-bold text-sm text-gray-900">
+                  Bukti Screenshot — {previewGallery.produk} ({previewGallery.activeIndex + 1} dari {previewGallery.images.length})
+                </h4>
+                <p className="text-xs text-red-600 font-semibold">
+                  {previewGallery.images[previewGallery.activeIndex]?.label}
+                </p>
+              </div>
+              <button onClick={() => setPreviewGallery(null)} className="p-1.5 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
             </div>
-            <img src={previewImage.url} alt="Bukti Screenshot" className="w-full h-auto max-h-[75vh] object-contain rounded-lg" />
+
+            <div className="relative bg-gray-900 rounded-xl overflow-hidden flex items-center justify-center min-h-[300px] max-h-[65vh]">
+              <img 
+                src={previewGallery.images[previewGallery.activeIndex]?.url} 
+                alt="Bukti Pelanggaran" 
+                className="w-full h-auto max-h-[65vh] object-contain" 
+              />
+              {previewGallery.images.length > 1 && (
+                <>
+                  <button 
+                    onClick={() => setPreviewGallery(prev => ({ ...prev, activeIndex: (prev.activeIndex - 1 + prev.images.length) % prev.images.length }))}
+                    className="absolute left-3 bg-white/90 hover:bg-white text-gray-900 p-2 rounded-full shadow-lg"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                  <button 
+                    onClick={() => setPreviewGallery(prev => ({ ...prev, activeIndex: (prev.activeIndex + 1) % prev.images.length }))}
+                    className="absolute right-3 bg-white/90 hover:bg-white text-gray-900 p-2 rounded-full shadow-lg"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Thumbnail Pilihan Gambar di Bawah */}
+            {previewGallery.images.length > 1 && (
+              <div className="flex gap-2 overflow-x-auto pt-3 mt-2">
+                {previewGallery.images.map((img, idx) => (
+                  <button
+                    key={img.id || idx}
+                    onClick={() => setPreviewGallery(prev => ({ ...prev, activeIndex: idx }))}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border shrink-0 transition-all ${
+                      previewGallery.activeIndex === idx ? 'bg-red-600 text-white border-red-600' : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    #{idx + 1} {img.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1288,7 +1401,7 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* HALAMAN 3: EVALUASI VIDEO PELANGGARAN (DENGAN EDIT, STATUS & 2 BUKTI SS)  */}
+      {/* HALAMAN 3: EVALUASI PELANGGARAN (MULTI-SS TANPA BATAS & TAMBAH JENIS)     */}
       {/* ========================================================================= */}
       {activeMenu === 'pelanggaran' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
@@ -1296,7 +1409,7 @@ export default function App() {
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
-            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, pantau status banding, dan lampirkan bukti SS teguran maupun SS hasil banding.</p>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, tambah jenis pelanggaran baru kapan saja, dan upload banyak bukti screenshot sekaligus.</p>
           </div>
 
           {/* FORM TAMBAH / EDIT PELANGGARAN */}
@@ -1340,18 +1453,49 @@ export default function App() {
                 required
               />
 
-              <select 
-                value={newViolation.jenis}
-                onChange={(e) => setNewViolation({...newViolation, jenis: e.target.value})}
-                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
-                required
-              >
-                <option value="">Jenis Pelanggaran...</option>
-                <option value="Produk Berbahaya / Tajam">Produk Berbahaya / Tajam</option>
-                <option value="Konten Tidak Orisinal / Reupload">Konten Tidak Orisinal / Reupload</option>
-                <option value="Klaim Berlebihan / Misleading">Klaim Berlebihan / Misleading</option>
-                <option value="Audio / Musik Hak Cipta">Audio / Musik Hak Cipta</option>
-              </select>
+              {/* DROPDOWN JENIS PELANGGARAN + FITUR KETIK JENIS BARU */}
+              {!isCustomJenis ? (
+                <select 
+                  value={newViolation.jenis}
+                  onChange={(e) => {
+                    if (e.target.value === '__TAMBAH_BARU__') {
+                      setIsCustomJenis(true);
+                      setNewViolation({...newViolation, jenis: ''});
+                    } else {
+                      setNewViolation({...newViolation, jenis: e.target.value});
+                    }
+                  }}
+                  className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+                  required
+                >
+                  <option value="">Jenis Pelanggaran...</option>
+                  {violationTypes.map((type, idx) => (
+                    <option key={idx} value={type}>{type}</option>
+                  ))}
+                  <option value="__TAMBAH_BARU__" className="font-bold text-red-600 bg-red-50">
+                    + Ketik Jenis Pelanggaran Baru...
+                  </option>
+                </select>
+              ) : (
+                <div className="flex gap-1">
+                  <input 
+                    type="text"
+                    placeholder="Ketik jenis pelanggaran baru..."
+                    value={newViolation.jenis}
+                    onChange={(e) => setNewViolation({...newViolation, jenis: e.target.value})}
+                    className="bg-white border-2 border-red-400 text-gray-800 text-sm rounded-lg p-2 font-semibold w-full"
+                    autoFocus
+                    required
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setIsCustomJenis(false)}
+                    className="px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-bold shrink-0"
+                  >
+                    Batal
+                  </button>
+                </div>
+              )}
 
               {/* PILIHAN STATUS BANDING */}
               <select 
@@ -1373,23 +1517,27 @@ export default function App() {
                 className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
               />
 
-              {/* Input Upload Bukti Screenshot 1: Teguran Awal */}
-              <label className="bg-gray-50 border border-dashed border-gray-300 hover:border-red-400 text-gray-700 text-sm rounded-lg p-2.5 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors">
-                <ImageIcon className="w-4 h-4 text-red-600 shrink-0" />
-                <span className="truncate text-xs">
-                  {newViolation.screenshotName ? `📷 ${newViolation.screenshotName}` : '1. Upload SS Teguran...'}
-                </span>
-                <input type="file" accept="image/*" onChange={(e) => handleScreenshotUpload(e, 'awal')} className="hidden" />
-              </label>
+              {/* MULTI-UPLOAD SCREENSHOT DENGAN PILIHAN LABEL */}
+              <div className="flex gap-1.5 sm:col-span-2">
+                <select
+                  value={ssLabelInput}
+                  onChange={(e) => setSsLabelInput(e.target.value)}
+                  className="bg-gray-50 border border-gray-200 text-gray-700 text-xs rounded-lg px-2.5 font-bold shrink-0"
+                >
+                  <option value="SS Teguran">Label: SS Teguran</option>
+                  <option value="SS Hasil Banding">Label: SS Banding</option>
+                  <option value="SS Poin Penalti">Label: SS Penalti</option>
+                  <option value="SS Bukti Lainnya">Label: SS Lainnya</option>
+                </select>
 
-              {/* Input Upload Bukti Screenshot 2: Hasil Banding */}
-              <label className="bg-gray-50 border border-dashed border-gray-300 hover:border-emerald-400 text-gray-700 text-sm rounded-lg p-2.5 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors">
-                <ImageIcon className="w-4 h-4 text-emerald-600 shrink-0" />
-                <span className="truncate text-xs">
-                  {newViolation.screenshotBandingName ? `📷 ${newViolation.screenshotBandingName}` : '2. Upload SS Hasil Banding...'}
-                </span>
-                <input type="file" accept="image/*" onChange={(e) => handleScreenshotUpload(e, 'banding')} className="hidden" />
-              </label>
+                <label className="flex-1 bg-gray-50 border border-dashed border-gray-300 hover:border-red-400 text-gray-700 text-sm rounded-lg p-2.5 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                  <ImageIcon className="w-4 h-4 text-red-600 shrink-0" />
+                  <span className="truncate text-xs">
+                    + Pilih Banyak SS Sekaligus ({(newViolation.screenshots || []).length} foto)
+                  </span>
+                  <input type="file" accept="image/*" multiple onChange={handleMultipleScreenshots} className="hidden" />
+                </label>
+              </div>
 
               <input 
                 type="text" 
@@ -1399,6 +1547,31 @@ export default function App() {
                 className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
               />
             </div>
+
+            {/* DAFTAR PREVIEW SCREENSHOT YANG SUDAH DIPILIH DI FORM */}
+            {newViolation.screenshots && newViolation.screenshots.length > 0 && (
+              <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-200">
+                <p className="text-xs font-bold text-gray-600 mb-2">
+                  Daftar Bukti Screenshot Terlampir ({newViolation.screenshots.length} gambar):
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {newViolation.screenshots.map((ss, idx) => (
+                    <div key={ss.id || idx} className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-gray-200 shadow-sm">
+                      <img src={ss.url} alt={ss.label} className="w-8 h-8 object-cover rounded border" />
+                      <span className="text-xs font-bold text-gray-700">{ss.label}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFormScreenshot(ss.id)}
+                        className="text-gray-400 hover:text-red-600 p-0.5"
+                        title="Hapus SS ini"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <button type="submit" className={`${editingViolationId !== null ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm`}>
@@ -1425,93 +1598,86 @@ export default function App() {
                     <th className="py-3.5 px-4 font-bold">Tanggal & Akun</th>
                     <th className="py-3.5 px-4 font-bold">Produk & Link Video</th>
                     <th className="py-3.5 px-4 font-bold">Jenis Pelanggaran</th>
-                    <th className="py-3.5 px-4 font-bold text-center">Bukti SS (Teguran & Banding)</th>
+                    <th className="py-3.5 px-4 font-bold text-center">Galeri Bukti SS (Multi)</th>
                     <th className="py-3.5 px-4 font-bold">Status Banding</th>
                     <th className="py-3.5 px-4 font-bold">Evaluasi / Tindakan</th>
                     <th className="py-3.5 px-4 font-bold text-center print:hidden">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {violations.map((v) => (
-                    <tr key={v.id} className={`hover:bg-gray-50 transition-colors ${editingViolationId === v.id ? 'bg-amber-50/40' : ''}`}>
-                      <td className="py-3.5 px-4">
-                        <p className="font-bold text-gray-900">{v.akun}</p>
-                        <span className="text-xs text-gray-500">{v.tanggal}</span>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <p className="font-bold text-gray-800">{v.produk}</p>
-                        {v.linkVideo ? (
-                          <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-0.5 w-max">
-                            Buka Video <ExternalLink className="w-3 h-3" />
-                          </a>
-                        ) : (
-                          <span className="text-xs text-gray-400 italic">Tanpa link</span>
-                        )}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">
-                          {v.jenis}
-                        </span>
-                      </td>
-
-                      {/* KOLOM 2 BUKTI SCREENSHOT: TEGURAN & HASIL BANDING */}
-                      <td className="py-3.5 px-4 text-center">
-                        <div className="flex flex-col items-center justify-center gap-1.5">
-                          {v.screenshot ? (
-                            <button 
-                              onClick={() => setPreviewImage({ url: v.screenshot, title: `Bukti Teguran Awal — ${v.produk}` })}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-800 rounded-md text-xs font-bold border border-red-200 transition-colors w-max"
-                            >
-                              <ImageIcon className="w-3.5 h-3.5 text-red-600" /> SS Teguran
-                            </button>
+                  {violations.map((v) => {
+                    const rowScreenshots = getViolationScreenshots(v);
+                    return (
+                      <tr key={v.id} className={`hover:bg-gray-50 transition-colors ${editingViolationId === v.id ? 'bg-amber-50/40' : ''}`}>
+                        <td className="py-3.5 px-4">
+                          <p className="font-bold text-gray-900">{v.akun}</p>
+                          <span className="text-xs text-gray-500">{v.tanggal}</span>
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <p className="font-bold text-gray-800">{v.produk}</p>
+                          {v.linkVideo ? (
+                            <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-0.5 w-max">
+                              Buka Video <ExternalLink className="w-3 h-3" />
+                            </a>
                           ) : (
-                            <span className="text-[11px] text-gray-400">Tanpa SS Teguran</span>
+                            <span className="text-xs text-gray-400 italic">Tanpa link</span>
                           )}
+                        </td>
+                        <td className="py-3.5 px-4">
+                          <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">
+                            {v.jenis}
+                          </span>
+                        </td>
 
-                          {v.screenshotBanding ? (
-                            <button 
-                              onClick={() => setPreviewImage({ url: v.screenshotBanding, title: `Bukti Hasil Banding — ${v.produk}` })}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-md text-xs font-bold border border-emerald-200 transition-colors w-max"
-                            >
-                              <ImageIcon className="w-3.5 h-3.5 text-emerald-600" /> SS Banding
-                            </button>
-                          ) : (
-                            <label className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-50 hover:bg-gray-100 text-gray-600 rounded text-[11px] font-semibold border border-dashed border-gray-300 cursor-pointer print:hidden">
-                              <Plus className="w-3 h-3 text-emerald-600" /> Tambah SS Banding
-                              <input type="file" accept="image/*" onChange={(e) => handleQuickUploadBandingSS(e, v.id)} className="hidden" />
+                        {/* KOLOM MULTI-SCREENSHOT GALERI */}
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-[220px] mx-auto">
+                            {rowScreenshots.map((ss, idx) => (
+                              <button
+                                key={ss.id || idx}
+                                onClick={() => setPreviewGallery({ produk: v.produk, images: rowScreenshots, activeIndex: idx })}
+                                className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 hover:bg-red-50 text-gray-800 hover:text-red-700 rounded-md text-[11px] font-bold border border-gray-300 transition-colors"
+                              >
+                                <ImageIcon className="w-3 h-3 text-red-600 shrink-0" />
+                                <span className="truncate max-w-[95px]">{ss.label || `SS #${idx + 1}`}</span>
+                              </button>
+                            ))}
+
+                            <label className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-md text-[11px] font-bold border border-dashed border-emerald-300 cursor-pointer print:hidden">
+                              <Plus className="w-3 h-3 text-emerald-600" /> Tambah SS
+                              <input type="file" accept="image/*" multiple onChange={(e) => handleQuickAddScreenshotsToRow(e, v.id)} className="hidden" />
                             </label>
-                          )}
-                        </div>
-                      </td>
+                          </div>
+                        </td>
 
-                      {/* KOLOM DROPDOWN STATUS BANDING LANGSUNG */}
-                      <td className="py-3.5 px-4">
-                        <select
-                          value={v.status || 'Belum Banding'}
-                          onChange={(e) => handleQuickStatusChange(v.id, e.target.value)}
-                          className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none ${getViolationStatusStyle(v.status)}`}
-                        >
-                          <option value="Belum Banding">Belum Banding</option>
-                          <option value="Menunggu Banding">Menunggu Banding</option>
-                          <option value="Banding Diterima">Banding Diterima</option>
-                          <option value="Banding Ditolak">Banding Ditolak</option>
-                        </select>
-                      </td>
+                        {/* KOLOM DROPDOWN STATUS BANDING */}
+                        <td className="py-3.5 px-4">
+                          <select
+                            value={v.status || 'Belum Banding'}
+                            onChange={(e) => handleQuickStatusChange(v.id, e.target.value)}
+                            className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none ${getViolationStatusStyle(v.status)}`}
+                          >
+                            <option value="Belum Banding">Belum Banding</option>
+                            <option value="Menunggu Banding">Menunggu Banding</option>
+                            <option value="Banding Diterima">Banding Diterima</option>
+                            <option value="Banding Ditolak">Banding Ditolak</option>
+                          </select>
+                        </td>
 
-                      <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
+                        <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
 
-                      {/* KOLOM TOMBOL EDIT BARIS */}
-                      <td className="py-3.5 px-4 text-center print:hidden">
-                        <button
-                          onClick={() => handleStartEditViolation(v)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
-                          title="Edit baris pelanggaran ini"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" /> Edit
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* KOLOM TOMBOL EDIT BARIS */}
+                        <td className="py-3.5 px-4 text-center print:hidden">
+                          <button
+                            onClick={() => handleStartEditViolation(v)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" /> Edit
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
