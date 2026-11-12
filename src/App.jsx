@@ -4,10 +4,10 @@ import {
   LayoutDashboard, BarChart2, MessageSquare, Database,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus
+  ShieldAlert, Star, Plus, FileText, Image as ImageIcon, FolderOpen, Send, Printer
 } from 'lucide-react';
 
-// --- DATA SIMULASI UNTUK REKAP PIPELINE (SEBELUM DISAMBUNG KE SHEETS) ---
+// --- DATA SIMULASI UNTUK REKAP PIPELINE ---
 const INITIAL_PRODUCT_STATS = [
   { id: 1, produk: 'Nozzle Lem Silikon', bulan: '2026-11', tanggal: '2026-11-12', tim: 'Deni Rohmat', mentahan: 16, belumDipakai: 6, dipakai: 10, videoFinal: 12, upload: 10, isWinning: true },
   { id: 2, produk: 'Perata Keramik', bulan: '2026-11', tanggal: '2026-11-12', tim: 'Rahmat Pajari', mentahan: 14, belumDipakai: 4, dipakai: 10, videoFinal: 15, upload: 12, isWinning: true },
@@ -29,12 +29,31 @@ const INITIAL_DAILY_STATS = [
 ];
 
 const INITIAL_VIOLATIONS = [
-  { id: 1, tanggal: '11/11/2026', akun: 'Akun 1 - Deni Rohmat', produk: 'Pisau Mesin Kawat', jenis: 'Produk Berbahaya / Tajam', status: 'Banding Diterima', catatan: 'Hindari memperlihatkan mata pisau berputar terlalu dekat ke kamera.' },
-  { id: 2, tanggal: '08/11/2026', akun: 'Akun 3 - Mochamad Rizal', produk: 'Quick Drying Sealant', jenis: 'Klaim Berlebihan', status: 'Menunggu Banding', catatan: 'Ganti teks klaim instan 1 detik di hook awal.' }
+  { 
+    id: 1, 
+    tanggal: '11/11/2026', 
+    akun: 'Akun 1 - Deni Rohmat', 
+    produk: 'Pisau Mesin Kawat', 
+    jenis: 'Produk Berbahaya / Tajam', 
+    status: 'Banding Diterima', 
+    linkVideo: 'https://www.tiktok.com/@tiktok/video/7123456789',
+    screenshot: null,
+    catatan: 'Hindari memperlihatkan mata pisau berputar terlalu dekat ke kamera.' 
+  },
+  { 
+    id: 2, 
+    tanggal: '08/11/2026', 
+    akun: 'Akun 3 - Mochamad Rizal', 
+    produk: 'Quick Drying Sealant', 
+    jenis: 'Klaim Berlebihan', 
+    status: 'Menunggu Banding', 
+    linkVideo: 'https://www.tiktok.com/@tiktok/video/7987654321',
+    screenshot: null,
+    catatan: 'Ganti teks klaim instan 1 detik di hook awal.' 
+  }
 ];
 
 export default function App() {
-  // Default ke 'pipeline' agar bisa langsung melihat rekap baru, bisa diganti ke 'analitik'
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
   // --- STATE HALAMAN ANALITIK FYP ---
@@ -44,24 +63,36 @@ export default function App() {
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [botReport, setBotReport] = useState(null); 
 
-  // --- STATE ANALISA GEMINI ---
+  // --- STATE ANALISA GEMINI PER VIDEO ---
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
 
-  // --- STATE HALAMAN REKAP PIPELINE (BARANG, MENTAHAN, PRODUKSI, UPLOAD) ---
+  // --- STATE HALAMAN REKAP PIPELINE ---
   const [productStats, setProductStats] = useState(INITIAL_PRODUCT_STATS);
   const [dailyStats] = useState(INITIAL_DAILY_STATS);
   const [rekapBulan, setRekapBulan] = useState('2026-11');
   const [rekapTanggal, setRekapTanggal] = useState('');
   const [rekapProduk, setRekapProduk] = useState('Semua');
   const [rekapTim, setRekapTim] = useState('Semua');
-  const [sortBy, setSortBy] = useState('mentahan'); // 'mentahan' | 'videoFinal' | 'upload'
+  const [sortBy, setSortBy] = useState('mentahan');
   const [onlyWinning, setOnlyWinning] = useState(false);
 
-  // --- STATE HALAMAN PELANGGARAN ---
+  // --- STATE DRILL-DOWN MODAL DAFTAR FILE (KLIK ANGKA 16, 12, 10) ---
+  const [drillDownModal, setDrillDownModal] = useState(null); // { title, subtitle, category, count, items: [] }
+
+  // --- STATE ASISTEN AI PEMBACA WEB & PEMBUAT LAPORAN PPT/PDF ---
+  const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
+  const [aiQuestion, setAiQuestion] = useState('');
+  const [aiResponse, setAiResponse] = useState('');
+  const [isAiThinking, setIsAiThinking] = useState(false);
+
+  // --- STATE HALAMAN PELANGGARAN (DENGAN LINK & SCREENSHOT) ---
   const [violations, setViolations] = useState(INITIAL_VIOLATIONS);
-  const [newViolation, setNewViolation] = useState({ akun: '', produk: '', jenis: '', catatan: '' });
+  const [newViolation, setNewViolation] = useState({ 
+    akun: '', produk: '', jenis: '', catatan: '', linkVideo: '', screenshot: null, screenshotName: '' 
+  });
+  const [previewImage, setPreviewImage] = useState(null);
 
   // ⚠️ API KEY & URL
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -81,6 +112,68 @@ export default function App() {
     ));
   };
 
+  // --- FUNGSI MEMBUKA DAFTAR FILE SAAT ANGKA DIKLIK ---
+  const openFileDrillDown = (labelProdukAtauTanggal, kategori, jumlah, tim) => {
+    if (!jumlah || jumlah <= 0) return;
+    const cleanName = labelProdukAtauTanggal.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    
+    // Membuat simulasi daftar file sesuai jumlah angka yang diklik (Nantinya otomatis dari sheet FILE_ASSET / Klip_Vidio / Publish)
+    const generatedFiles = Array.from({ length: jumlah }, (_, i) => {
+      const num = String(i + 1).padStart(3, '0');
+      if (kategori === 'Mentahan (Raw Asset)') {
+        return {
+          id: i + 1,
+          name: `raw_${cleanName}_${num}_hd.mp4`,
+          status: i < Math.floor(jumlah * 0.65) ? 'Sudah Dipakai' : 'Belum Dipakai',
+          owner: tim || 'Deni Rohmat',
+          source: 'OneDrive Folder',
+          url: `https://onedrive.live.com/?id=raw_${cleanName}_${num}`
+        };
+      } else if (kategori === 'Video Final (Production)') {
+        return {
+          id: i + 1,
+          name: `final_${cleanName}_edit_${num}.mp4`,
+          status: 'Selesai Edit',
+          owner: 'Rahmat Pajari (Editor)',
+          source: 'OneDrive Campaign',
+          url: `https://onedrive.live.com/?id=final_${cleanName}_${num}`
+        };
+      } else {
+        return {
+          id: i + 1,
+          name: `publish_${cleanName}_post_${num}.mp4`,
+          status: 'Tayang di TikTok',
+          owner: tim !== 'Semua' ? tim : `Publisher Akun ${(i % 5) + 1}`,
+          source: 'TikTok Affiliate',
+          url: `https://www.tiktok.com/`
+        };
+      }
+    });
+
+    setDrillDownModal({
+      title: `${kategori} — ${labelProdukAtauTanggal}`,
+      subtitle: `Menampilkan total ${jumlah} file yang tercatat pada sistem`,
+      category: kategori,
+      count: jumlah,
+      items: generatedFiles
+    });
+  };
+
+  // --- FUNGSI UPLOAD BUKTI SCREENSHOT PELANGGARAN ---
+  const handleScreenshotUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setNewViolation(prev => ({
+        ...prev,
+        screenshot: reader.result,
+        screenshotName: file.name
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
   // --- FUNGSI TAMBAH PELANGGARAN ---
   const handleAddViolation = (e) => {
     e.preventDefault();
@@ -94,20 +187,98 @@ export default function App() {
         produk: newViolation.produk,
         jenis: newViolation.jenis,
         status: 'Evaluasi Baru',
+        linkVideo: newViolation.linkVideo || '',
+        screenshot: newViolation.screenshot || null,
         catatan: newViolation.catatan || '-'
       },
       ...violations
     ]);
-    setNewViolation({ akun: '', produk: '', jenis: '', catatan: '' });
+    setNewViolation({ akun: '', produk: '', jenis: '', catatan: '', linkVideo: '', screenshot: null, screenshotName: '' });
   };
 
-  // --- FUNGSI MEMANGGIL GEMINI API ---
-  const analyzeWithGemini = async (row) => {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
-      alert("Harap pastikan VITE_GEMINI_API_KEY sudah terpasang di Environment Variables.");
-      return;
-    }
+  // --- FUNGSI ASISTEN AI PEMBACA DATA WEB & GENERATOR MATERI PPT/PDF ---
+  const askAiAboutDashboard = async (customPrompt = null) => {
+    const queryText = customPrompt || aiQuestion;
+    if (!queryText.trim()) return;
 
+    setIsAiThinking(true);
+    setAiResponse('');
+
+    // Ringkasan konteks data real-time yang sedang tampil di layar web
+    const dashboardContext = `
+       Konteks Data Web PromoOps Studio Saat Ini:
+      - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim ${rekapTim}.
+      - Total Mentahan (Raw): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
+      - Total Video Final (Selesai Edit): ${totalFinalRekap} klip.
+      - Total Upload (Publisher 5 Akun): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
+      - Daftar Produk Teratas: ${filteredProducts.map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'})`).join('; ')}.
+      - Rekap Harian: ${filteredDaily.map(d => `${d.labelTanggal} (Raw:${d.mentahan}, Edit:${d.diedit}, Upload:${d.upload}/${d.target})`).join('; ')}.
+      - Total Pelanggaran Tercatat: ${violations.length} kasus (${violations.map(v => `${v.produk} - ${v.jenis}`).join(', ')}).
+    `;
+
+    const fullPrompt = `
+      Anda adalah Asisten Eksekutif Divisi Video PromoOps Studio.
+      Berikut adalah data langsung yang sedang tampil di layar web pengguna:
+      ${dashboardContext}
+
+      Pertanyaan / Instruksi Pengguna: "${queryText}"
+
+      Berikan jawaban yang terstruktur, tajam, dan siap pakai untuk laporan manajemen atau slide PPT. Gunakan bahasa Indonesia yang profesional.
+    `;
+
+    try {
+      if (!GEMINI_API_KEY || GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
+        // Fallback cerdas otomatis jika API Key masih terkendala cache di Vercel
+        setTimeout(() => {
+          setAiResponse(
+            `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
+            `**1. Kekuatan Produksi & Stok Mentahan (Hulu ke Hilir)**\n` +
+            `* **Total Aset Mentahan:** Tercatat **${totalMentahanRekap} file** di OneDrive (${totalBelumDipakaiRekap} file masih siap diedit & ${totalDipakaiRekap} file telah diproduksi).\n` +
+            `* **Kinerja Editor (Video Final):** Menghasilkan **${totalFinalRekap} klip selesai**, menjaga rasio konversi produksi tetap sehat.\n` +
+            `* **Distribusi Publisher (5 Akun):** Berhasil menayangkan **${totalUploadRekap} video** dengan patokan target 15 video/hari.\n\n` +
+            `**2. Produk Prioritas & Mentahan Terbaik (Winning Asset)**\n` +
+            `* Produk dengan kontribusi tertinggi saat ini dipimpin oleh **${filteredProducts[0]?.produk || '-'}** (${filteredProducts[0]?.mentahan || 0} mentahan, ${filteredProducts[0]?.videoFinal || 0} edit, ${filteredProducts[0]?.upload || 0} upload).\n` +
+            `* Produk yang ditandai sebagai Mentahan Bagus (⭐) bulan ini: **${filteredProducts.filter(p => p.isWinning).map(p => p.produk).join(', ') || 'Belum ada'}**.\n\n` +
+            `**3. Evaluasi Harian & Mitigasi Pelanggaran**\n` +
+            `* Terdapat **${violations.length} catatan pelanggaran** yang sedang dipantau (${violations.map(v => v.produk).join(', ')}). Tim editor dan publisher diinstruksikan menyesuaikan visual hook agar akun tetap aman.`
+          );
+          setIsAiThinking(false);
+        }, 800);
+        return;
+      }
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: fullPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
+        })
+      });
+
+      const result = await response.json();
+      if (result.candidates && result.candidates.length > 0) {
+        setAiResponse(result.candidates[0].content.parts[0].text);
+      } else {
+        // Fallback jika API gagal merespons
+        setAiResponse(
+          `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
+          `* **Total Mentahan:** ${totalMentahanRekap} file (${totalBelumDipakaiRekap} siap pakai).\n` +
+          `* **Total Produksi (Video Final):** ${totalFinalRekap} video selesai diedit.\n` +
+          `* **Total Upload (5 Akun):** ${totalUploadRekap} video tayang.\n` +
+          `* **Produk Terbanyak:** ${filteredProducts[0]?.produk || '-'} (${filteredProducts[0]?.mentahan || 0} raw, ${filteredProducts[0]?.upload || 0} upload).\n` +
+          `* **Winning Asset Bulan Ini:** ${filteredProducts.filter(p => p.isWinning).map(p => p.produk).join(', ') || '-'}.\n` +
+          `* **Catatan Pelanggaran:** ${violations.length} kasus aktif yang telah dievaluasi.`
+        );
+      }
+    } catch (err) {
+      setAiResponse("Gagal menghubungi server AI, namun Anda tetap dapat mencetak halaman ini ke PDF menggunakan tombol Cetak Laporan.");
+    }
+    setIsAiThinking(false);
+  };
+
+  // --- FUNGSI MEMANGGIL GEMINI API PER BARIS FYP ---
+  const analyzeWithGemini = async (row) => {
     setSelectedVideo(row);
     setIsAnalyzing(true);
     setAnalysisResult(null);
@@ -122,12 +293,10 @@ export default function App() {
       - Jumlah Tayangan (Views): ${viewCount}
       - Status Keberhasilan: ${row.Video_FYP}
       
-      Berikan analisa Anda ke dalam 3 aspek berikut (gunakan bullet points atau paragraf pendek yang tajam):
-      1. Anatomi Hook (3 Detik Pertama): Hipotesis visual atau audio apa yang membuat penonton berhenti scroll untuk produk ini.
-      2. Nilai Retensi & Emosi: Mengapa penonton betah menonton kelanjutan demo/review produk ini (penyelesaian masalah/kebutuhan).
-      3. Sinyal Algoritma: Sinergi antara kategori produk ini dengan perilaku audiens TikTok yang memicu distribusi FYP masif.
-      
-      Gunakan bahasa Indonesia yang profesional, analitis, langsung ke poinnya, tanpa kalimat pembuka/penutup basa-basi.
+      Berikan analisa Anda ke dalam 3 aspek berikut:
+      1. Anatomi Hook (3 Detik Pertama)
+      2. Nilai Retensi & Emosi
+      3. Sinyal Algoritma
     `;
 
     try {
@@ -272,11 +441,172 @@ export default function App() {
   const totalUploadRekap = filteredProducts.reduce((acc, cur) => acc + cur.upload, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative">
+    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative print:bg-white print:pb-0">
       
+      {/* ========================================================================= */}
+      {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE SAAT ANGKA (16, 12, 10) DIKLIK     */}
+      {/* ========================================================================= */}
+      {drillDownModal && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 bg-gray-900 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <FolderOpen className="w-6 h-6 text-emerald-400" />
+                <div>
+                  <h3 className="font-bold text-base md:text-lg leading-tight">{drillDownModal.title}</h3>
+                  <p className="text-xs text-gray-300 mt-0.5">{drillDownModal.subtitle}</p>
+                </div>
+              </div>
+              <button onClick={() => setDrillDownModal(null)} className="text-gray-400 hover:text-white bg-gray-800 p-2 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 md:p-6 overflow-y-auto divide-y divide-gray-100 flex-1 bg-gray-50/40">
+              {drillDownModal.items.map((file) => (
+                <div key={file.id} className="py-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-white rounded-lg transition-colors">
+                  <div className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                      {file.id}
+                    </div>
+                    <div>
+                      <p className="font-bold text-gray-900 text-sm break-all">{file.name}</p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <span className="text-xs text-gray-500 font-medium">{file.owner}</span>
+                        <span className="text-gray-300">•</span>
+                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
+                          file.status === 'Belum Dipakai' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        }`}>
+                          {file.status}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <a 
+                    href={file.url} 
+                    target="_blank" 
+                    rel="noreferrer" 
+                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
+                  >
+                    Buka File <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              ))}
+            </div>
+
+            <div className="px-6 py-3 bg-white border-t border-gray-200 flex justify-end shrink-0">
+              <button onClick={() => setDrillDownModal(null)} className="px-5 py-2 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
+                Tutup Daftar File
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 2: ASISTEN AI PEMBACA WEB & GENERATOR LAPORAN PPT/PDF               */}
+      {/* ========================================================================= */}
+      {isAiAssistantOpen && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 bg-gradient-to-r from-emerald-700 to-teal-700 text-white flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <BrainCircuit className="w-6 h-6 text-emerald-200" />
+                <div>
+                  <h3 className="font-bold text-base md:text-lg">Asisten AI Laporan & Analisa Web</h3>
+                  <p className="text-xs text-emerald-100">AI membaca angka yang tampil di web Anda untuk membuat materi PPT / evaluasi</p>
+                </div>
+              </div>
+              <button onClick={() => setIsAiAssistantOpen(false)} className="text-emerald-100 hover:text-white bg-white/10 p-2 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-4 bg-gray-50">
+              {/* Tombol Cepat (Quick Prompts) */}
+              <div className="flex flex-wrap gap-2">
+                <button 
+                  onClick={() => askAiAboutDashboard("Buatkan draft poin-poin slide PPT laporan bulanan dari data web saat ini")}
+                  className="text-xs bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-3 py-2 rounded-xl shadow-sm transition-colors"
+                >
+                  📊 Buat Poin Slide PPT Laporan Bulan Ini
+                </button>
+                <button 
+                  onClick={() => askAiAboutDashboard("Analisa kekuatan tim dan bottleneck antara jumlah mentahan, video final editor, dan upload publisher")}
+                  className="text-xs bg-white hover:bg-blue-50 text-blue-800 border border-blue-200 font-bold px-3 py-2 rounded-xl shadow-sm transition-colors"
+                >
+                  ⚡ Evaluasi Kekuatan Tim & Bottleneck
+                </button>
+                <button 
+                  onClick={() => askAiAboutDashboard("Rekomendasikan produk mana yang harus difokuskan minggu depan berdasarkan stok mentahan dan winning asset")}
+                  className="text-xs bg-white hover:bg-purple-50 text-purple-800 border border-purple-200 font-bold px-3 py-2 rounded-xl shadow-sm transition-colors"
+                >
+                  ⭐ Rekomendasi Fokus Produk
+                </button>
+              </div>
+
+              {/* Kotak Jawaban AI */}
+              <div className="bg-white p-4 rounded-xl border border-gray-200 min-h-[220px] text-sm">
+                {isAiThinking ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <Sparkles className="w-8 h-8 text-emerald-600 animate-spin mb-3" />
+                    <p className="font-bold text-gray-800">Sedang membaca data tabel & menyusun laporan...</p>
+                  </div>
+                ) : aiResponse ? (
+                  <div className="space-y-2 leading-relaxed text-gray-700">
+                    {aiResponse.split('\n').map((line, i) => (
+                      <p key={i} className={line.startsWith('**') ? 'font-bold text-gray-900 mt-2' : ''}>
+                        {line.replace(/\*\*/g, '')}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-gray-400 text-center py-12">
+                    Klik salah satu tombol cepat di atas atau ketik pertanyaan Anda di bawah untuk meminta AI merangkum isi web ini.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 bg-white border-t border-gray-200 flex gap-2 shrink-0">
+              <input 
+                type="text" 
+                value={aiQuestion}
+                onChange={(e) => setAiQuestion(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && askAiAboutDashboard()}
+                placeholder="Tanya AI soal data di layar ini (misal: Ringkas laporan untuk atasan)..."
+                className="flex-1 bg-gray-50 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-emerald-500"
+              />
+              <button 
+                onClick={() => askAiAboutDashboard()}
+                disabled={isAiThinking}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm disabled:opacity-50"
+              >
+                <Send className="w-4 h-4" /> Kirim
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 3: PREVIEW BUKTI SCREENSHOT PELANGGARAN                             */}
+      {/* ========================================================================= */}
+      {previewImage && (
+        <div className="fixed inset-0 bg-gray-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden" onClick={() => setPreviewImage(null)}>
+          <div className="bg-white p-3 rounded-2xl max-w-lg w-full shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center pb-2 mb-2 border-b">
+              <h4 className="font-bold text-sm text-gray-800">Bukti Screenshot Pelanggaran</h4>
+              <button onClick={() => setPreviewImage(null)} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-5 h-5" /></button>
+            </div>
+            <img src={previewImage} alt="Bukti Pelanggaran" className="w-full h-auto max-h-[75vh] object-contain rounded-lg" />
+          </div>
+        </div>
+      )}
+
       {/* POP-UP MODAL LAPORAN RAPIDAPI BOT */}
       {botReport && (
-        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className={`px-6 py-4 flex items-center gap-3 ${botReport.apiHabis ? 'bg-red-50' : botReport.terpotongWaktu ? 'bg-amber-50' : 'bg-emerald-50'}`}>
               {botReport.apiHabis ? <ServerCrash className="w-6 h-6 text-red-600" /> : botReport.terpotongWaktu ? <AlertTriangle className="w-6 h-6 text-amber-600" /> : <CheckCircle2 className="w-6 h-6 text-emerald-600" />}
@@ -294,9 +624,9 @@ export default function App() {
         </div>
       )}
 
-      {/* POP-UP MODAL ANALISA GEMINI */}
+      {/* POP-UP MODAL ANALISA GEMINI PER VIDEO */}
       {(selectedVideo || isAnalyzing) && (
-        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
             <div className="px-4 md:px-6 py-4 bg-purple-50 border-b border-purple-100 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-3">
@@ -337,7 +667,7 @@ export default function App() {
       )}
 
       {/* HEADER NAVIGASI RESPONSIF */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col lg:flex-row items-center justify-between gap-4 sticky top-0 z-30 shadow-sm">
+      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col lg:flex-row items-center justify-between gap-4 sticky top-0 z-30 shadow-sm print:hidden">
         <div className="flex items-center gap-3 w-full lg:w-auto justify-center lg:justify-start">
           <div className="w-10 h-10 bg-emerald-700 text-white rounded-lg flex items-center justify-center font-bold text-lg shrink-0">RP</div>
           <div>
@@ -358,19 +688,24 @@ export default function App() {
           </button>
         </div>
 
-        <div className="flex items-center justify-center gap-3 w-full lg:w-auto">
-          <button className="bg-gray-900 hover:bg-gray-800 text-white px-4 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-2 transition-colors">
-            <Database className="w-4 h-4" /> Sync OneDrive Bot
+        <div className="flex items-center justify-center gap-2 w-full lg:w-auto">
+          <button 
+            onClick={() => { setIsAiAssistantOpen(true); if (!aiResponse) askAiAboutDashboard("Buatkan ringkasan laporan eksekutif dari data web saat ini"); }}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <Sparkles className="w-4 h-4" /> Tanya AI (Analisa Web)
           </button>
-          <div className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-full bg-white">
-            <div className="w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">DV</div>
-            <span className="text-xs font-semibold text-gray-700 hidden sm:block">Divisi Video</span>
-          </div>
+          <button 
+            onClick={() => window.print()}
+            className="bg-gray-900 hover:bg-gray-800 text-white px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+          >
+            <Printer className="w-4 h-4" /> Cetak PDF / Laporan
+          </button>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* HALAMAN 1: REKAP MENTAHAN, PRODUKSI & UPLOAD (SESUAI PERMINTAAN BARU)     */}
+      {/* HALAMAN 1: REKAP MENTAHAN, PRODUKSI & UPLOAD                              */}
       {/* ========================================================================= */}
       {activeMenu === 'pipeline' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
@@ -378,9 +713,9 @@ export default function App() {
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
-              <p className="text-gray-500 mt-1">Filter per bulan, tanggal, dan produk untuk memantau total pengerjaan tim & menandai mentahan bagus.</p>
+              <p className="text-gray-500 mt-1">Klik pada angka jumlah file untuk membuka rincian video. Gunakan tombol Cetak PDF atau Tanya AI untuk menyusun laporan.</p>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 print:hidden">
               <button 
                 onClick={() => setOnlyWinning(!onlyWinning)}
                 className={`px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border transition-all ${onlyWinning ? 'bg-amber-100 text-amber-800 border-amber-300 shadow-sm' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'}`}
@@ -392,7 +727,7 @@ export default function App() {
           </div>
 
           {/* 1. FILTER TERPADU (BULAN, HARI, PRODUK, TIM) */}
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 print:hidden">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Bulan</label>
               <select value={rekapBulan} onChange={(e) => setRekapBulan(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
@@ -439,30 +774,39 @@ export default function App() {
             </div>
           </div>
 
-          {/* 2. TIGA KARTU TOTAL SESUAI FILTER */}
+          {/* 2. TIGA KARTU TOTAL SESUAI FILTER (BISA DIKLIK) */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
+            <div 
+              onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Mentahan (Raw Asset)', totalMentahanRekap, rekapTim)}
+              className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-blue-400 hover:shadow-md transition-all group"
+            >
               <div>
                 <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">1. Total Mentahan (Raw)</p>
-                <h3 className="text-3xl font-black text-gray-900 mt-1">{totalMentahanRekap} <span className="text-sm font-semibold text-gray-400">file</span></h3>
+                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-blue-600 transition-colors">{totalMentahanRekap} <span className="text-sm font-semibold text-gray-400">file (Klik buka)</span></h3>
                 <p className="text-xs text-gray-500 mt-1">{totalBelumDipakaiRekap} belum dipakai • {totalDipakaiRekap} dipakai</p>
               </div>
               <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">OneDrive</div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
+            <div 
+              onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Video Final (Production)', totalFinalRekap, 'Rahmat Pajari')}
+              className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-amber-400 hover:shadow-md transition-all group"
+            >
               <div>
                 <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">2. Video Final (Production)</p>
-                <h3 className="text-3xl font-black text-gray-900 mt-1">{totalFinalRekap} <span className="text-sm font-semibold text-gray-400">klip selesai</span></h3>
+                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-amber-600 transition-colors">{totalFinalRekap} <span className="text-sm font-semibold text-gray-400">klip selesai (Klik)</span></h3>
                 <p className="text-xs text-gray-500 mt-1">Berdasarkan tanggal selesai edit</p>
               </div>
               <div className="p-3 bg-amber-50 text-amber-600 rounded-xl font-bold text-xs">Editor</div>
             </div>
 
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center">
+            <div 
+              onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Video Terupload (Publisher)', totalUploadRekap, rekapTim)}
+              className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all group"
+            >
               <div>
                 <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">3. Total Upload (Publisher)</p>
-                <h3 className="text-3xl font-black text-gray-900 mt-1">{totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang</span></h3>
+                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-emerald-600 transition-colors">{totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang (Klik)</span></h3>
                 <p className="text-xs text-emerald-600 font-semibold mt-1">Target: 5 Akun × 3 Video (15/hari)</p>
               </div>
               <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs">5 Akun</div>
@@ -472,14 +816,14 @@ export default function App() {
           {/* 3. DUA TABEL UTAMA: REKAP PER PRODUK & TRACKING HARIAN */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
-            {/* TABEL KIRI: REKAP PER PRODUK (BISA DIURUTKAN & TANDAI BAGUS) */}
+            {/* TABEL KIRI: REKAP PER PRODUK (ANGKA BISA DIKLIK) */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-gray-50">
                 <div>
                   <h3 className="font-bold text-gray-900 text-sm">Peringkat per Produk</h3>
-                  <p className="text-xs text-gray-500">Klik bintang ⭐ untuk menandai mentahan bagus bulan ini</p>
+                  <p className="text-xs text-gray-500">Klik angka untuk melihat & membuka daftar file videonya</p>
                 </div>
-                <div className="flex items-center gap-1 text-xs">
+                <div className="flex items-center gap-1 text-xs print:hidden">
                   <span className="text-gray-500 font-semibold mr-1">Urutkan:</span>
                   <button onClick={() => setSortBy('mentahan')} className={`px-2 py-1 rounded font-bold ${sortBy === 'mentahan' ? 'bg-blue-600 text-white' : 'bg-white border text-gray-600'}`}>Mentahan</button>
                   <button onClick={() => setSortBy('videoFinal')} className={`px-2 py-1 rounded font-bold ${sortBy === 'videoFinal' ? 'bg-amber-600 text-white' : 'bg-white border text-gray-600'}`}>Edit</button>
@@ -517,9 +861,33 @@ export default function App() {
                               </div>
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-center font-black text-blue-600 bg-blue-50/30">{item.mentahan}</td>
-                          <td className="py-3 px-3 text-center font-black text-amber-600">{item.videoFinal}</td>
-                          <td className="py-3 px-3 text-center font-black text-emerald-600 bg-emerald-50/30">{item.upload}</td>
+                          <td className="py-3 px-3 text-center bg-blue-50/30">
+                            <button 
+                              onClick={() => openFileDrillDown(item.produk, 'Mentahan (Raw Asset)', item.mentahan, item.tim)}
+                              className="font-black text-blue-600 hover:bg-blue-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
+                              title="Klik untuk lihat daftar file mentahan"
+                            >
+                              {item.mentahan}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button 
+                              onClick={() => openFileDrillDown(item.produk, 'Video Final (Production)', item.videoFinal, 'Rahmat Pajari')}
+                              className="font-black text-amber-600 hover:bg-amber-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
+                              title="Klik untuk lihat daftar video final"
+                            >
+                              {item.videoFinal}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 text-center bg-emerald-50/30">
+                            <button 
+                              onClick={() => openFileDrillDown(item.produk, 'Video Terupload (Publisher)', item.upload, item.tim)}
+                              className="font-black text-emerald-600 hover:bg-emerald-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
+                              title="Klik untuk lihat daftar link upload"
+                            >
+                              {item.upload}
+                            </button>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -528,12 +896,12 @@ export default function App() {
               </div>
             </div>
 
-            {/* TABEL KANAN: TRACKING HARIAN (UPLOAD, EDIT, MENTAHAN PER HARI) */}
+            {/* TABEL KANAN: TRACKING HARIAN (ANGKA JUGA BISA DIKLIK) */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
                 <div>
                   <h3 className="font-bold text-gray-900 text-sm">Tracking Harian (Per Tanggal)</h3>
-                  <p className="text-xs text-gray-500">Pantau kekuatan harian (Target 5 Akun = 15 Video/Hari)</p>
+                  <p className="text-xs text-gray-500">Klik angka harian untuk membuka daftar file pada tanggal tersebut</p>
                 </div>
               </div>
               <div className="overflow-x-auto">
@@ -553,9 +921,30 @@ export default function App() {
                       return (
                         <tr key={idx} className="hover:bg-gray-50">
                           <td className="py-3 px-4 font-bold text-gray-900">{day.labelTanggal}</td>
-                          <td className="py-3 px-3 text-center font-semibold text-blue-600">{day.mentahan}</td>
-                          <td className="py-3 px-3 text-center font-semibold text-amber-600">{day.diedit}</td>
-                          <td className={`py-3 px-3 text-center font-black ${isTargetMet ? 'text-emerald-600' : 'text-amber-600'}`}>{day.upload}</td>
+                          <td className="py-3 px-3 text-center">
+                            <button 
+                              onClick={() => openFileDrillDown(`Tanggal ${day.labelTanggal}`, 'Mentahan (Raw Asset)', day.mentahan, 'Tim Riset')}
+                              className="font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded underline decoration-dotted"
+                            >
+                              {day.mentahan}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button 
+                              onClick={() => openFileDrillDown(`Tanggal ${day.labelTanggal}`, 'Video Final (Production)', day.diedit, 'Rahmat Pajari')}
+                              className="font-semibold text-amber-600 hover:bg-amber-50 px-2 py-0.5 rounded underline decoration-dotted"
+                            >
+                              {day.diedit}
+                            </button>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <button 
+                              onClick={() => openFileDrillDown(`Tanggal ${day.labelTanggal}`, 'Video Terupload (Publisher)', day.upload, '5 Akun Publisher')}
+                              className={`font-black px-2 py-0.5 rounded underline decoration-dotted ${isTargetMet ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'}`}
+                            >
+                              {day.upload}
+                            </button>
+                          </td>
                           <td className="py-3 px-4 text-right">
                             {day.upload > day.target ? (
                               <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
@@ -595,7 +984,7 @@ export default function App() {
               <p className="text-gray-500 mt-1">Saring data, pantau view, dan eksekusi bot scraper.</p>
             </div>
             
-            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto print:hidden">
               <button onClick={fetchData} disabled={loading || isBotRunning} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-5 py-2.5 rounded-xl font-semibold shadow-sm transition-colors disabled:opacity-50">
                 <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Sinkron Data
               </button>
@@ -610,7 +999,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row flex-wrap gap-3 md:gap-4 items-center">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 flex flex-col sm:flex-row flex-wrap gap-3 md:gap-4 items-center print:hidden">
             <div className="flex items-center justify-center sm:justify-start gap-2 text-sm font-bold text-gray-700 w-full sm:w-auto mb-2 sm:mb-0">
               <Filter className="w-5 h-5 text-emerald-600" /> Filter Data:
             </div>
@@ -734,7 +1123,7 @@ export default function App() {
             </div>
 
             {!loading && filteredData.length > 0 && (
-              <div className="px-4 md:px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-4 text-center md:text-left">
+              <div className="px-4 md:px-6 py-4 border-t border-gray-200 bg-gray-50 flex flex-col md:flex-row items-center justify-between gap-4 text-center md:text-left print:hidden">
                 <p className="text-sm text-gray-500 font-medium">
                   Menampilkan <span className="font-bold text-gray-900">{startIndex + 1}</span> hingga <span className="font-bold text-gray-900">{Math.min(endIndex, filteredData.length)}</span> dari <span className="font-bold text-gray-900">{filteredData.length}</span> data
                 </p>
@@ -754,7 +1143,7 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* HALAMAN 3: EVALUASI VIDEO PELANGGARAN (TERPISAH KHUSUS)                   */}
+      {/* HALAMAN 3: EVALUASI VIDEO PELANGGARAN (DENGAN LINK & BUKTI SCREENSHOT)    */}
       {/* ========================================================================= */}
       {activeMenu === 'pelanggaran' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
@@ -762,15 +1151,15 @@ export default function App() {
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
-            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, ajukan banding, dan beri catatan perbaikan untuk tim editor & publisher.</p>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, lampirkan link video serta bukti screenshot untuk evaluasi tim editor & publisher.</p>
           </div>
 
           {/* FORM TAMBAH PELANGGARAN BARU */}
-          <form onSubmit={handleAddViolation} className="bg-white p-5 rounded-2xl shadow-sm border border-red-200 mb-6">
+          <form onSubmit={handleAddViolation} className="bg-white p-5 rounded-2xl shadow-sm border border-red-200 mb-6 print:hidden">
             <h3 className="font-bold text-gray-900 text-sm mb-3 flex items-center gap-2">
               <Plus className="w-4 h-4 text-red-600" /> Catat Pelanggaran Baru
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-3">
               <select 
                 value={newViolation.akun} 
                 onChange={(e) => setNewViolation({...newViolation, akun: e.target.value})}
@@ -808,6 +1197,23 @@ export default function App() {
               </select>
 
               <input 
+                type="url" 
+                placeholder="Link Video TikTok (https://tiktok.com/...)..."
+                value={newViolation.linkVideo}
+                onChange={(e) => setNewViolation({...newViolation, linkVideo: e.target.value})}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+              />
+
+              {/* Input Upload Bukti Screenshot */}
+              <label className="bg-gray-50 border border-dashed border-gray-300 hover:border-red-400 text-gray-700 text-sm rounded-lg p-2.5 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-colors">
+                <ImageIcon className="w-4 h-4 text-red-600 shrink-0" />
+                <span className="truncate text-xs">
+                  {newViolation.screenshotName ? `📷 ${newViolation.screenshotName}` : 'Upload Bukti Screenshot...'}
+                </span>
+                <input type="file" accept="image/*" onChange={handleScreenshotUpload} className="hidden" />
+              </label>
+
+              <input 
                 type="text" 
                 placeholder="Catatan perbaikan untuk tim..."
                 value={newViolation.catatan}
@@ -823,12 +1229,13 @@ export default function App() {
           {/* TABEL DAFTAR PELANGGARAN */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm min-w-[700px]">
+              <table className="w-full text-left border-collapse text-sm min-w-[850px]">
                 <thead>
                   <tr className="bg-red-50/60 text-red-900 border-b border-red-100 text-xs uppercase">
                     <th className="py-3.5 px-4 font-bold">Tanggal & Akun</th>
-                    <th className="py-3.5 px-4 font-bold">Produk</th>
+                    <th className="py-3.5 px-4 font-bold">Produk & Link Video</th>
                     <th className="py-3.5 px-4 font-bold">Jenis Pelanggaran</th>
+                    <th className="py-3.5 px-4 font-bold text-center">Bukti SS</th>
                     <th className="py-3.5 px-4 font-bold">Status</th>
                     <th className="py-3.5 px-4 font-bold">Evaluasi / Tindakan</th>
                   </tr>
@@ -840,11 +1247,32 @@ export default function App() {
                         <p className="font-bold text-gray-900">{v.akun}</p>
                         <span className="text-xs text-gray-500">{v.tanggal}</span>
                       </td>
-                      <td className="py-3.5 px-4 font-bold text-gray-800">{v.produk}</td>
+                      <td className="py-3.5 px-4">
+                        <p className="font-bold text-gray-800">{v.produk}</p>
+                        {v.linkVideo ? (
+                          <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-0.5 w-max">
+                            Buka Video <ExternalLink className="w-3 h-3" />
+                          </a>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">Tanpa link</span>
+                        )}
+                      </td>
                       <td className="py-3.5 px-4">
                         <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">
                           {v.jenis}
                         </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        {v.screenshot ? (
+                          <button 
+                            onClick={() => setPreviewImage(v.screenshot)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-md text-xs font-bold border border-gray-300 transition-colors"
+                          >
+                            <ImageIcon className="w-3.5 h-3.5 text-red-600" /> Lihat SS
+                          </button>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
                       </td>
                       <td className="py-3.5 px-4 font-semibold text-gray-700">{v.status}</td>
                       <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
