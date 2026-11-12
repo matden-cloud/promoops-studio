@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   Search, LayoutDashboard, BarChart2, MessageSquare, Database,
-  Calendar, Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, X, AlertTriangle, CheckCircle2, ServerCrash
+  Calendar, Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit
 } from 'lucide-react';
 
 export default function App() {
@@ -12,19 +12,77 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   
-  // State untuk Bot & Notifikasi Laporan
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [botReport, setBotReport] = useState(null); 
 
+  // --- STATE BARU UNTUK ANALISA GEMINI ---
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [selectedVideo, setSelectedVideo] = useState(null);
+
+  // ⚠️ MASUKKAN API KEY GEMINI ANDA DI SINI
+  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+  const API_URL = "https://script.google.com/macros/s/AKfycbwTxa-MqVkrK65FPqNfR8ZglL17sZQ5QTExgQ0jtc_U--MXMoo4PrHnpOlpfmZQaS1n0g/exec";
+
+  // STATE FILTER & PAGINATION
   const [filterBulan, setFilterBulan] = useState('Semua');
   const [filterAkun, setFilterAkun] = useState('Semua');
   const [filterFyp, setFilterFyp] = useState('Semua');
-
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
-  const API_URL = "https://script.google.com/macros/s/AKfycbwTxa-MqVkrK65FPqNfR8ZglL17sZQ5QTExgQ0jtc_U--MXMoo4PrHnpOlpfmZQaS1n0g/exec";
+  // --- FUNGSI BARU: MEMANGGIL GEMINI API ---
+  const analyzeWithGemini = async (row) => {
+    if (GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
+      alert("Harap masukkan API Key Gemini Anda terlebih dahulu di dalam kode App.jsx (baris 24).");
+      return;
+    }
 
+    setSelectedVideo(row);
+    setIsAnalyzing(true);
+    setAnalysisResult(null);
+
+    const viewCount = (parseInt(String(row.View).replace(/[^0-9]/g, '')) || 0).toLocaleString('id-ID');
+    const prompt = `
+      Anda adalah pakar Algoritma TikTok dan Strategi Konten E-Commerce.
+      Tugas Anda adalah memberikan analisa mendalam, padat, dan tidak bertele-tele mengenai mengapa video promosi ini berhasil.
+      
+      Data Video:
+      - Nama Barang/Produk: ${row.Induk_Barang}
+      - Jumlah Tayangan (Views): ${viewCount}
+      - Status Keberhasilan: ${row.Video_FYP}
+      
+      Berikan analisa Anda ke dalam 3 aspek berikut (gunakan bullet points atau paragraf pendek yang tajam):
+      1. Anatomi Hook (3 Detik Pertama): Hipotesis visual atau audio apa yang membuat penonton berhenti scroll untuk produk ini.
+      2. Nilai Retensi & Emosi: Mengapa penonton betah menonton kelanjutan demo/review produk ini (penyelesaian masalah/kebutuhan).
+      3. Sinyal Algoritma: Sinergi antara kategori produk ini dengan perilaku audiens TikTok yang memicu distribusi FYP masif.
+      
+      Gunakan bahasa Indonesia yang profesional, analitis, langsung ke poinnya, tanpa kalimat pembuka/penutup basa-basi.
+    `;
+
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 600 }
+        })
+      });
+
+      const result = await response.json();
+      if (result.candidates && result.candidates.length > 0) {
+        setAnalysisResult(result.candidates[0].content.parts[0].text);
+      } else {
+        setAnalysisResult("Gagal mendapatkan analisa dari bot AI.");
+      }
+    } catch (err) {
+      setAnalysisResult("Terjadi kesalahan koneksi saat menghubungi server AI.");
+    }
+    setIsAnalyzing(false);
+  };
+
+  // Helper Functions (Tetap sama)
   const getBulanFormat = (dateStr) => {
     if (!dateStr) return 'Tanpa Tanggal';
     try {
@@ -76,17 +134,14 @@ export default function App() {
     setLoading(false);
   };
 
-  // FUNGSI EKSEKUSI BOT & MENANGKAP LAPORAN
   const runBotScraper = async () => {
     setIsBotRunning(true);
     try {
       const response = await fetch(`${API_URL}?action=run_update`);
       const result = await response.json();
-      
       if (result.status === "success") {
-        // Tampilkan Modal Laporan dari Apps Script
         setBotReport(result.report); 
-        fetchData(); // Update data di tabel dengan angka terbaru
+        fetchData(); 
       } else {
         alert("Gagal menjalankan bot: " + result.message);
       }
@@ -124,62 +179,75 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative">
       
-      {/* --- POP-UP MODAL LAPORAN BOT --- */}
+      {/* POP-UP MODAL LAPORAN RAPIDAPI BOT (Sama seperti sebelumnya) */}
       {botReport && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            {/* Header Modal */}
             <div className={`px-6 py-4 flex items-center gap-3 ${botReport.apiHabis ? 'bg-red-50' : botReport.terpotongWaktu ? 'bg-amber-50' : 'bg-emerald-50'}`}>
-              {botReport.apiHabis ? <ServerCrash className="w-6 h-6 text-red-600" /> : 
-               botReport.terpotongWaktu ? <AlertTriangle className="w-6 h-6 text-amber-600" /> : 
-               <CheckCircle2 className="w-6 h-6 text-emerald-600" />}
-              <h3 className="font-bold text-lg text-gray-900">
-                {botReport.apiHabis ? 'Kuota API Rapid Habis!' : botReport.terpotongWaktu ? 'Pengecekan Dijeda (Time Limit)' : 'Pengecekan Selesai'}
-              </h3>
+              {botReport.apiHabis ? <ServerCrash className="w-6 h-6 text-red-600" /> : botReport.terpotongWaktu ? <AlertTriangle className="w-6 h-6 text-amber-600" /> : <CheckCircle2 className="w-6 h-6 text-emerald-600" />}
+              <h3 className="font-bold text-lg text-gray-900">{botReport.apiHabis ? 'Kuota API Rapid Habis!' : botReport.terpotongWaktu ? 'Pengecekan Dijeda (Time Limit)' : 'Pengecekan Selesai'}</h3>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-600 text-sm mb-6 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">"{botReport.pesan}"</p>
+              <div className="space-y-4">
+                <div className="flex justify-between items-center border-b border-gray-100 pb-3"><span className="text-gray-500 text-sm font-semibold">Video Dianalisa di Data_View:</span><span className="font-bold text-gray-900">{botReport.videoTerdeteksi} baris</span></div>
+                <div className="flex justify-between items-center border-b border-gray-100 pb-3"><span className="text-gray-500 text-sm font-semibold">Penggunaan Kuota RapidAPI Sesi ini:</span><span className={`font-bold px-3 py-1 rounded-md text-sm ${botReport.apiHabis ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>{botReport.apiTerpakai} request</span></div>
+                {botReport.apiHabis && <div className="bg-red-50 text-red-700 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 mt-2 border border-red-200"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><span>Peringatan: Seluruh 8 kunci API cadangan Anda telah mencapai limit. Proses bot dihentikan otomatis.</span></div>}
+                {botReport.terpotongWaktu && <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 mt-2 border border-amber-200"><AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /><span>Peringatan: Bot dihentikan di menit ke 4.5. Anda bisa mengklik tombol 'Jalankan Bot' lagi untuk melanjutkan.</span></div>}
+              </div>
+              <button onClick={() => setBotReport(null)} className="w-full mt-6 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 rounded-xl transition-colors shadow-md">Tutup Laporan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- POP-UP MODAL ANALISA GEMINI --- */}
+      {(selectedVideo || isAnalyzing) && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            {/* Header Modal */}
+            <div className="px-6 py-4 bg-purple-50 border-b border-purple-100 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-purple-100 text-purple-700 rounded-lg flex items-center justify-center"><BrainCircuit className="w-6 h-6" /></div>
+                <div>
+                  <h3 className="font-bold text-lg text-purple-900 leading-tight">Analisa Strategi FYP</h3>
+                  <p className="text-xs text-purple-600 font-semibold">{selectedVideo?.Induk_Barang || "Memproses..."}</p>
+                </div>
+              </div>
+              <button onClick={() => { setSelectedVideo(null); setAnalysisResult(null); }} className="text-gray-400 hover:text-gray-700 bg-white p-2 rounded-full shadow-sm"><X className="w-5 h-5" /></button>
             </div>
             
-            {/* Isi Modal */}
-            <div className="p-6">
-              <p className="text-gray-600 text-sm mb-6 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">
-                "{botReport.pesan}"
-              </p>
-              
-              <div className="space-y-4">
-                <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-                  <span className="text-gray-500 text-sm font-semibold">Video Dianalisa di Data_View:</span>
-                  <span className="font-bold text-gray-900">{botReport.videoTerdeteksi} baris</span>
+            {/* Body Modal (Bisa di-scroll jika panjang) */}
+            <div className="p-6 overflow-y-auto bg-gray-50/50 flex-1">
+              {isAnalyzing ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center">
+                  <Sparkles className="w-10 h-10 text-purple-500 animate-pulse mb-4" />
+                  <h4 className="font-bold text-gray-900 text-lg">Gemini Sedang Menganalisa...</h4>
+                  <p className="text-sm text-gray-500 mt-2 max-w-sm">Mengevaluasi pola hook, nilai jual produk, dan korelasi algoritma berdasarkan pencapaian views.</p>
                 </div>
-                <div className="flex justify-between items-center border-b border-gray-100 pb-3">
-                  <span className="text-gray-500 text-sm font-semibold">Penggunaan Kuota RapidAPI Sesi ini:</span>
-                  <span className={`font-bold px-3 py-1 rounded-md text-sm ${botReport.apiHabis ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>
-                    {botReport.apiTerpakai} request
-                  </span>
+              ) : (
+                <div className="prose prose-sm prose-purple max-w-none">
+                  {/* Kita render hasil markdown/teks dari Gemini dengan memecah baris baru */}
+                  {analysisResult?.split('\n').map((line, i) => {
+                    if (line.trim() === '') return <br key={i} />;
+                    if (line.startsWith('**') && line.endsWith('**')) return <h4 key={i} className="font-bold text-gray-900 mt-4 mb-2">{line.replace(/\*\*/g, '')}</h4>;
+                    if (line.startsWith('* ')) return <li key={i} className="text-gray-700 ml-4 mb-1">{line.replace('* ', '')}</li>;
+                    return <p key={i} className="text-gray-700 leading-relaxed mb-3">{line.replace(/\*\*/g, '')}</p>;
+                  })}
                 </div>
-                {botReport.apiHabis && (
-                  <div className="bg-red-50 text-red-700 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 mt-2 border border-red-200">
-                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>Peringatan: Seluruh 8 kunci API cadangan Anda telah mencapai limit. Proses bot dihentikan otomatis. Silakan coba lagi besok saat kuota di-reset.</span>
-                  </div>
-                )}
-                {botReport.terpotongWaktu && (
-                  <div className="bg-amber-50 text-amber-700 p-3 rounded-lg text-xs font-semibold flex items-start gap-2 mt-2 border border-amber-200">
-                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-                    <span>Peringatan: Bot dihentikan di menit ke 4.5 agar Google tidak memberikan Error. Masih ada sisa video yang belum tercek, Anda bisa mengklik tombol 'Jalankan Bot' lagi untuk melanjutkannya.</span>
-                  </div>
-                )}
-              </div>
-
-              <button 
-                onClick={() => setBotReport(null)}
-                className="w-full mt-6 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 rounded-xl transition-colors shadow-md"
-              >
-                Tutup Laporan
+              )}
+            </div>
+            
+            {/* Footer Modal */}
+            <div className="px-6 py-4 bg-white border-t border-gray-100 shrink-0">
+              <button onClick={() => { setSelectedVideo(null); setAnalysisResult(null); }} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-3 rounded-xl transition-colors shadow-sm">
+                Selesai Membaca
               </button>
             </div>
           </div>
         </div>
       )}
-      {/* --- AKHIR MODAL --- */}
+      {/* --- AKHIR MODAL GEMINI --- */}
 
 
       {/* HEADER NAVIGASI */}
@@ -292,7 +360,6 @@ export default function App() {
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6 relative">
             
-            {/* OVERLAY LOADING SAAT BOT BERJALAN */}
             {isBotRunning && (
               <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
                 <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin mb-3" />
@@ -347,7 +414,11 @@ export default function App() {
                           </td>
                           <td className="px-6 py-4">
                             <div className="flex flex-col gap-2 min-w-[200px]">
-                              <button className="flex items-center justify-center gap-1.5 w-full bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-1.5 rounded-md text-xs font-bold border border-purple-200 transition-colors shadow-sm">
+                              {/* PERUBAHAN: Tombol memicu analisa Gemini */}
+                              <button 
+                                onClick={() => analyzeWithGemini(row)}
+                                className="flex items-center justify-center gap-1.5 w-full bg-purple-50 text-purple-700 hover:bg-purple-100 px-3 py-1.5 rounded-md text-xs font-bold border border-purple-200 transition-colors shadow-sm"
+                              >
                                 <Sparkles className="w-3.5 h-3.5" /> Analisa FYP via Bot
                               </button>
                               <div className="relative">
