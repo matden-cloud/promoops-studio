@@ -255,20 +255,20 @@ export default function App() {
         <div className="flex items-center gap-3 w-1/4">
           <div className="w-10 h-10 bg-emerald-700 text-white rounded-lg flex items-center justify-center font-bold text-lg">RP</div>
           <div>
-            <h1 className="font-bold text-gray-900 text-sm">PromoOps & Riset</h1>
-            <p className="text-xs text-gray-500">Klip_Vidio • OneDrive • Repliz</p>
+            <h1 className="font-bold text-gray-900 text-sm">Video</h1>
+            <p className="text-xs text-gray-500">OneDrive • Repliz • View</p>
           </div>
         </div>
         
         <div className="flex bg-gray-50 p-1 rounded-lg border border-gray-200 shadow-inner">
           <button onClick={() => setActiveMenu('pipeline')} className={`px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pipeline' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
-            <LayoutDashboard className="w-4 h-4" /> Pipeline & Barang (5)
+            <LayoutDashboard className="w-4 h-4" /> Barang ()
           </button>
           <button onClick={() => setActiveMenu('analitik')} className={`px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'analitik' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
             <BarChart2 className="w-4 h-4" /> Laporan Analitik FYP
           </button>
           <button className="px-4 py-2 text-sm font-semibold rounded-md flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-all">
-            <MessageSquare className="w-4 h-4" /> Agent Chat & Bot (Full) <span className="w-2 h-2 bg-emerald-500 rounded-full ml-1"></span>
+            <MessageSquare className="w-4 h-4" /> Agent Chat & Bot  <span className="w-2 h-2 bg-emerald-500 rounded-full ml-1"></span>
           </button>
         </div>
 
@@ -278,7 +278,7 @@ export default function App() {
           </button>
           <div className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-full bg-white">
             <div className="w-6 h-6 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center text-xs font-bold">DV</div>
-            <span className="text-xs font-semibold text-gray-700">Divisi Promo (2 Orang)</span>
+            <span className="text-xs font-semibold text-gray-700">Divisi</span>
           </div>
         </div>
       </div>
