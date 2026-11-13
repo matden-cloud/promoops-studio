@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BarChart2,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity
+  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown
 } from 'lucide-react';
 
 const DEFAULT_VIOLATION_TYPES = [
@@ -108,6 +108,11 @@ export default function App() {
   const [rekapTim, setRekapTim] = useState('Semua');
   const [sortBy, setSortBy] = useState('mentahan');
   const [onlyWinning, setOnlyWinning] = useState(false);
+
+  // --- STATE KONTROL PANEL KOTAK BULANAN (PER 3 BULAN & HIDE/SHOW) ---
+  const [isPowerPanelOpen, setIsPowerPanelOpen] = useState(true);
+  const [monthViewLimit, setMonthViewLimit] = useState(3); // 3, 6, atau 999 (Semua)
+  const [monthPageIndex, setMonthPageIndex] = useState(0);
 
   // --- STATE PENYIMPANAN BINTANG PER PRODUK & PER FILE ---
   const [winningWebMap, setWinningWebMap] = useState({});
@@ -362,7 +367,6 @@ export default function App() {
       return map[ym];
     };
 
-    // Saring berdasarkan Filter Produk & Tim jika sedang dipilih (namun tampilkan SELURUH bulan)
     rawAssets.forEach((r, idx) => {
       const mProduk = rekapProduk === 'Semua' || r.produk === rekapProduk;
       const mTim = rekapTim === 'Semua' || normalizePersonName(r.creator).toLowerCase() === rekapTim.toLowerCase();
@@ -450,50 +454,56 @@ export default function App() {
       });
     });
 
-    return Object.values(map)
-      .sort((a, b) => b.month.localeCompare(a.month))
-      .map(item => {
-        // Hitung rentang hari berjalan di bulan tersebut untuk menghitung Power /hari & Estimasi Bulanan
-        const allDates = Array.from(item.activeDatesSet).sort();
-        const maxDayNum = allDates.length > 0 ? parseInt(allDates[allDates.length - 1].split('-')[2], 10) : item.daysInMonth;
-        // Gunakan pembagi hari kerja/aktif yang realistis agar estimasi kekuatan akurat
-        const activeSpanDays = Math.max(maxDayNum, 1);
-        const workDaysRaw = Math.max(item.rawDatesSet.size, 1);
-        const workDaysKlip = Math.max(item.klipDatesSet.size, 1);
-        const workDaysPub = Math.max(item.pubDatesSet.size, 1);
+    const sortedMonths = Object.values(map).sort((a, b) => b.month.localeCompare(a.month));
+    const latestMonthKey = sortedMonths[0]?.month || '';
 
-        // Kecepatan rata-rata per hari aktif (Power Harian)
-        const powerRawPerHari = (item.mentahan / workDaysRaw).toFixed(1);
-        const powerKlipPerHari = (item.produksi / workDaysKlip).toFixed(1);
-        const powerPubPerHari = (item.publish / workDaysPub).toFixed(1);
+    return sortedMonths.map(item => {
+      const allDates = Array.from(item.activeDatesSet).sort();
+      const maxDayNum = allDates.length > 0 ? parseInt(allDates[allDates.length - 1].split('-')[2], 10) : item.daysInMonth;
+      const activeSpanDays = Math.max(maxDayNum, 1);
+      const workDaysRaw = Math.max(item.rawDatesSet.size, 1);
+      const workDaysKlip = Math.max(item.klipDatesSet.size, 1);
+      const workDaysPub = Math.max(item.pubDatesSet.size, 1);
 
-        // Estimasi Kekuatan Penuh 1 Bulan (berdasarkan laju hari berjalan / 26 hari kerja)
-        const isCurrentMonth = maxDayNum < item.daysInMonth - 2;
-        const estRawBulanan = isCurrentMonth ? Math.round((item.mentahan / activeSpanDays) * item.daysInMonth) : item.mentahan;
-        const estKlipBulanan = isCurrentMonth ? Math.round((item.produksi / activeSpanDays) * item.daysInMonth) : item.produksi;
-        const estPubBulanan = isCurrentMonth ? Math.round((item.publish / activeSpanDays) * item.daysInMonth) : item.publish;
+      const powerRawPerHari = (item.mentahan / workDaysRaw).toFixed(1);
+      const powerKlipPerHari = (item.produksi / workDaysKlip).toFixed(1);
+      const powerPubPerHari = (item.publish / workDaysPub).toFixed(1);
 
-        // Target bulanan standar (15 video/hari x jumlah hari berjalan)
-        const targetBerjalan = workDaysPub * 15;
-        const powerPercentage = item.publish > 0 ? Math.round((item.publish / targetBerjalan) * 100) : 0;
+      // Hanya tampilkan Estimasi (~) untuk bulan terbaru yang sedang berjalan
+      const isCurrentMonth = item.month === latestMonthKey && maxDayNum < item.daysInMonth - 2;
+      const estRawBulanan = isCurrentMonth ? Math.round((item.mentahan / activeSpanDays) * item.daysInMonth) : item.mentahan;
+      const estKlipBulanan = isCurrentMonth ? Math.round((item.produksi / activeSpanDays) * item.daysInMonth) : item.produksi;
+      const estPubBulanan = isCurrentMonth ? Math.round((item.publish / activeSpanDays) * item.daysInMonth) : item.publish;
 
-        return {
-          ...item,
-          activeDaysCount: allDates.length,
-          rawActiveDays: item.rawDatesSet.size,
-          klipActiveDays: item.klipDatesSet.size,
-          pubActiveDays: item.pubDatesSet.size,
-          powerRawPerHari,
-          powerKlipPerHari,
-          powerPubPerHari,
-          estRawBulanan,
-          estKlipBulanan,
-          estPubBulanan,
-          isCurrentMonth,
-          powerPercentage
-        };
-      });
+      const targetBerjalan = workDaysPub * 15;
+      const powerPercentage = item.publish > 0 ? Math.round((item.publish / targetBerjalan) * 100) : 0;
+
+      return {
+        ...item,
+        activeDaysCount: allDates.length,
+        rawActiveDays: item.rawDatesSet.size,
+        klipActiveDays: item.klipDatesSet.size,
+        pubActiveDays: item.pubDatesSet.size,
+        powerRawPerHari,
+        powerKlipPerHari,
+        powerPubPerHari,
+        estRawBulanan,
+        estKlipBulanan,
+        estPubBulanan,
+        isCurrentMonth,
+        powerPercentage
+      };
+    });
   }, [rawAssets, klipVideos, publishVideos, data, rekapProduk, rekapTim, accountLookup]);
+
+  // Potong kartu bulan sesuai pilihan tampilan (Per 3 Bulan, Per 6 Bulan, atau Semua)
+  const totalMonthPages = Math.max(1, Math.ceil(monthlyPowerCards.length / monthViewLimit));
+  const safeMonthPage = Math.min(monthPageIndex, totalMonthPages - 1);
+  const visibleMonthlyCards = useMemo(() => {
+    if (monthViewLimit >= 999) return monthlyPowerCards;
+    const start = safeMonthPage * monthViewLimit;
+    return monthlyPowerCards.slice(start, start + monthViewLimit);
+  }, [monthlyPowerCards, monthViewLimit, safeMonthPage]);
 
   // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD ---
   const filteredRawList = useMemo(() => {
@@ -1556,141 +1566,219 @@ export default function App() {
           </div>
 
           {/* ========================================================================= */}
-          {/* 2. KOTAK KHUSUS SELURUH BULAN & ESTIMASI POWER KEKUATAN                   */}
+          {/* 2. KOTAK POWER BULANAN (PER 3 BULAN + BISA DI-HIDE AGAR HEMAT LAYAR)      */}
           {/* ========================================================================= */}
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-100">
-              <div className="flex items-center gap-2.5">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 mb-6 overflow-hidden">
+            {/* Bar Atas Panel: Judul + Pilihan 3/6/Semua Bulan + Geser Halaman + Tombol Hide */}
+            <div className="px-5 py-3.5 bg-gray-50/70 flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-gray-100">
+              <div 
+                onClick={() => setIsPowerPanelOpen(!isPowerPanelOpen)}
+                className="flex items-center gap-2.5 cursor-pointer select-none"
+              >
                 <div className="p-2 bg-emerald-50 text-emerald-700 rounded-lg">
                   <Activity className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-gray-900 text-sm md:text-base">
-                    Power & Estimasi Kekuatan per Bulan (Seluruh Bulan)
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-gray-900 text-sm md:text-base">
+                      Power & Estimasi Kekuatan per Bulan
+                    </h3>
+                    <span className="text-[11px] font-bold bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full">
+                      {monthlyPowerCards.length} Bulan
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-500">
-                    Menampilkan kecepatan rata-rata harian (<span className="font-semibold text-gray-700">file/hari aktif</span>) dan estimasi kapasitas penuh di setiap bulan. Klik kotak bulan untuk memfilter.
+                    Kecepatan rata-rata harian (<span className="font-semibold text-gray-700">file/hari aktif</span>) & kapasitas bulanan. Klik kartu untuk memfilter bulan.
                   </p>
                 </div>
               </div>
-              {rekapBulan !== 'Semua' && (
+
+              {/* Kontrol Tampilan Per 3 Bulan & Hide/Show */}
+              <div className="flex flex-wrap items-center gap-2 print:hidden">
+                {rekapBulan !== 'Semua' && (
+                  <button
+                    onClick={() => setRekapBulan('Semua')}
+                    className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2.5 py-1.5 rounded-lg transition-colors"
+                  >
+                    Reset Filter ({rekapBulan})
+                  </button>
+                )}
+
+                {isPowerPanelOpen && (
+                  <>
+                    {/* Pemilih Jumlah Kotak Bulan: 3 Bulan, 6 Bulan, Semua */}
+                    <div className="flex items-center bg-white border border-gray-200 rounded-lg p-0.5 text-xs font-bold shadow-sm">
+                      <button
+                        onClick={() => { setMonthViewLimit(3); setMonthPageIndex(0); }}
+                        className={`px-2.5 py-1 rounded-md transition-colors ${monthViewLimit === 3 ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                      >
+                        Per 3 Bulan
+                      </button>
+                      <button
+                        onClick={() => { setMonthViewLimit(6); setMonthPageIndex(0); }}
+                        className={`px-2.5 py-1 rounded-md transition-colors ${monthViewLimit === 6 ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                      >
+                        6 Bulan
+                      </button>
+                      <button
+                        onClick={() => { setMonthViewLimit(999); setMonthPageIndex(0); }}
+                        className={`px-2.5 py-1 rounded-md transition-colors ${monthViewLimit >= 999 ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                      >
+                        Semua ({monthlyPowerCards.length})
+                      </button>
+                    </div>
+
+                    {/* Tombol Geser Kiri/Kanan jika mode Per 3 Bulan / 6 Bulan */}
+                    {monthViewLimit < 999 && totalMonthPages > 1 && (
+                      <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg px-1.5 py-1 text-xs font-bold shadow-sm">
+                        <button
+                          onClick={() => setMonthPageIndex(p => Math.max(0, p - 1))}
+                          disabled={safeMonthPage === 0}
+                          title="Bulan Lebih Baru"
+                          className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-30"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-[11px] text-gray-600 px-1">
+                          {safeMonthPage + 1}/{totalMonthPages}
+                        </span>
+                        <button
+                          onClick={() => setMonthPageIndex(p => Math.min(totalMonthPages - 1, p + 1))}
+                          disabled={safeMonthPage >= totalMonthPages - 1}
+                          title="3 Bulan Sebelumnya"
+                          className="p-0.5 hover:bg-gray-100 rounded disabled:opacity-30"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Tombol Sembunyikan / Tampilkan */}
                 <button
-                  onClick={() => setRekapBulan('Semua')}
-                  className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg self-start sm:self-auto transition-colors"
+                  onClick={() => setIsPowerPanelOpen(!isPowerPanelOpen)}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 border border-gray-200 rounded-lg text-xs font-bold shadow-sm transition-colors"
                 >
-                  Tampilkan Semua Bulan
+                  {isPowerPanelOpen ? (
+                    <><ChevronUp className="w-4 h-4" /> Sembunyikan</>
+                  ) : (
+                    <><ChevronDown className="w-4 h-4" /> Tampilkan Power Bulanan</>
+                  )}
                 </button>
-              )}
+              </div>
             </div>
 
-            {loading && monthlyPowerCards.length === 0 ? (
-              <div className="py-8 text-center text-gray-400 text-sm font-semibold">
-                Menghitung kekuatan Mentahan, Produksi, dan Publish di seluruh bulan...
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {monthlyPowerCards.map((m) => {
-                  const isSelected = rekapBulan === m.month;
-                  const barWidth = Math.min(m.powerPercentage, 100);
-                  return (
-                    <div
-                      key={m.month}
-                      onClick={() => setRekapBulan(isSelected ? 'Semua' : m.month)}
-                      className={`rounded-xl p-4 border transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-emerald-50/40 border-emerald-500 ring-2 ring-emerald-200 shadow-md'
-                          : 'bg-gray-50/60 hover:bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm'
-                      }`}
-                    >
-                      {/* Header Bulan & Badge Power Publish */}
-                      <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                          <Calendar className={`w-4 h-4 ${isSelected ? 'text-emerald-600' : 'text-gray-500'}`} />
-                          <span className="font-black text-gray-900 text-sm md:text-base">{m.title}</span>
-                        </div>
-                        <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
-                          m.powerPercentage >= 100
-                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                            : m.powerPercentage >= 75
-                            ? 'bg-blue-100 text-blue-800 border-blue-300'
-                            : 'bg-amber-100 text-amber-800 border-amber-300'
-                        }`}>
-                          ⚡ Power Publish: {m.powerPercentage}%
-                        </span>
-                      </div>
-
-                      {/* 3 Kotak Metrik Utama di Dalam Bulan: Mentahan, Produksi, Publish */}
-                      <div className="grid grid-cols-3 gap-2 text-center mb-3">
-                        {/* Mentahan */}
+            {/* Isi Grid Kotak Bulan (Hanya tampil jika tidak di-hide) */}
+            {isPowerPanelOpen && (
+              <div className="p-4 md:p-5">
+                {loading && monthlyPowerCards.length === 0 ? (
+                  <div className="py-6 text-center text-gray-400 text-sm font-semibold">
+                    Menghitung kekuatan Mentahan, Produksi, dan Publish...
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {visibleMonthlyCards.map((m) => {
+                      const isSelected = rekapBulan === m.month;
+                      const barWidth = Math.min(m.powerPercentage, 100);
+                      return (
                         <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openRealFilesModal(m.title, 'Mentahan (Raw_Asset)', m.rawFiles);
-                          }}
-                          className="bg-white p-2.5 rounded-lg border border-blue-100 hover:border-blue-400 transition-colors"
-                          title="Klik untuk membuka file Mentahan bulan ini"
+                          key={m.month}
+                          onClick={() => setRekapBulan(isSelected ? 'Semua' : m.month)}
+                          className={`rounded-xl p-3.5 border transition-all cursor-pointer ${
+                            isSelected
+                              ? 'bg-emerald-50/40 border-emerald-500 ring-2 ring-emerald-200 shadow-sm'
+                              : 'bg-gray-50/60 hover:bg-white border-gray-200 hover:border-gray-300'
+                          }`}
                         >
-                          <p className="text-[10px] font-bold text-blue-600 uppercase">1. Mentahan</p>
-                          <p className="text-xl font-black text-gray-900 mt-0.5 underline decoration-dotted decoration-blue-400">{m.mentahan}</p>
-                          <p className="text-[11px] font-bold text-blue-700 mt-0.5">⚡ {m.powerRawPerHari}/hr</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            {m.isCurrentMonth ? `Est: ~${m.estRawBulanan}` : `${m.rawActiveDays} hr aktif`}
-                          </p>
-                        </div>
+                          <div className="flex items-center justify-between mb-2.5">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className={`w-4 h-4 ${isSelected ? 'text-emerald-600' : 'text-gray-500'}`} />
+                              <span className="font-black text-gray-900 text-sm">{m.title}</span>
+                            </div>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                              m.powerPercentage >= 100
+                                ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                                : m.powerPercentage >= 75
+                                ? 'bg-blue-100 text-blue-800 border-blue-300'
+                                : 'bg-amber-100 text-amber-800 border-amber-300'
+                            }`}>
+                              ⚡ Power Publish: {m.powerPercentage}%
+                            </span>
+                          </div>
 
-                        {/* Produksi / Video Final */}
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openRealFilesModal(m.title, 'Produksi (Klip_Vidio)', m.klipFiles);
-                          }}
-                          className="bg-white p-2.5 rounded-lg border border-amber-100 hover:border-amber-400 transition-colors"
-                          title="Klik untuk membuka file Video Final bulan ini"
-                        >
-                          <p className="text-[10px] font-bold text-amber-600 uppercase">2. Produksi</p>
-                          <p className="text-xl font-black text-gray-900 mt-0.5 underline decoration-dotted decoration-amber-400">{m.produksi}</p>
-                          <p className="text-[11px] font-bold text-amber-700 mt-0.5">⚡ {m.powerKlipPerHari}/hr</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            {m.isCurrentMonth ? `Est: ~${m.estKlipBulanan}` : `${m.klipActiveDays} hr edit`}
-                          </p>
-                        </div>
+                          <div className="grid grid-cols-3 gap-2 text-center mb-2.5">
+                            {/* Mentahan */}
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRealFilesModal(m.title, 'Mentahan (Raw_Asset)', m.rawFiles);
+                              }}
+                              className="bg-white p-2 rounded-lg border border-blue-100 hover:border-blue-400 transition-colors"
+                              title="Klik untuk membuka file Mentahan bulan ini"
+                            >
+                              <p className="text-[10px] font-bold text-blue-600 uppercase">1. Mentahan</p>
+                              <p className="text-lg font-black text-gray-900 underline decoration-dotted decoration-blue-400">{m.mentahan}</p>
+                              <p className="text-[10px] font-bold text-blue-700">⚡ {m.powerRawPerHari}/hr</p>
+                              <p className="text-[10px] text-gray-400">
+                                {m.isCurrentMonth ? `Est: ~${m.estRawBulanan}` : `${m.rawActiveDays} hr aktif`}
+                              </p>
+                            </div>
 
-                        {/* Publish / Upload */}
-                        <div
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openRealFilesModal(m.title, 'Publish (Tayang)', m.uploadFiles);
-                          }}
-                          className="bg-white p-2.5 rounded-lg border border-emerald-100 hover:border-emerald-400 transition-colors"
-                          title="Klik untuk membuka video Publish bulan ini"
-                        >
-                          <p className="text-[10px] font-bold text-emerald-600 uppercase">3. Publish</p>
-                          <p className="text-xl font-black text-gray-900 mt-0.5 underline decoration-dotted decoration-emerald-400">{m.publish}</p>
-                          <p className="text-[11px] font-bold text-emerald-700 mt-0.5">⚡ {m.powerPubPerHari}/hr</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            {m.isCurrentMonth ? `Est: ~${m.estPubBulanan}` : `${m.pubActiveDays} hr tayang`}
-                          </p>
-                        </div>
-                      </div>
+                            {/* Produksi */}
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRealFilesModal(m.title, 'Produksi (Klip_Vidio)', m.klipFiles);
+                              }}
+                              className="bg-white p-2 rounded-lg border border-amber-100 hover:border-amber-400 transition-colors"
+                              title="Klik untuk membuka file Video Final bulan ini"
+                            >
+                              <p className="text-[10px] font-bold text-amber-600 uppercase">2. Produksi</p>
+                              <p className="text-lg font-black text-gray-900 underline decoration-dotted decoration-amber-400">{m.produksi}</p>
+                              <p className="text-[10px] font-bold text-amber-700">⚡ {m.powerKlipPerHari}/hr</p>
+                              <p className="text-[10px] text-gray-400">
+                                {m.isCurrentMonth ? `Est: ~${m.estKlipBulanan}` : `${m.klipActiveDays} hr edit`}
+                              </p>
+                            </div>
 
-                      {/* Progress Bar Kapasitas Harian & Stok Sisa */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-[11px] font-semibold text-gray-500">
-                          <span>Sisa Mentahan: <strong className="text-gray-800">{m.mentahanBelumDipakai} raw</strong></span>
-                          <span>Rata-rata vs Target 15/hr</span>
+                            {/* Publish */}
+                            <div
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openRealFilesModal(m.title, 'Publish (Tayang)', m.uploadFiles);
+                              }}
+                              className="bg-white p-2 rounded-lg border border-emerald-100 hover:border-emerald-400 transition-colors"
+                              title="Klik untuk membuka video Publish bulan ini"
+                            >
+                              <p className="text-[10px] font-bold text-emerald-600 uppercase">3. Publish</p>
+                              <p className="text-lg font-black text-gray-900 underline decoration-dotted decoration-emerald-400">{m.publish}</p>
+                              <p className="text-[10px] font-bold text-emerald-700">⚡ {m.powerPubPerHari}/hr</p>
+                              <p className="text-[10px] text-gray-400">
+                                {m.isCurrentMonth ? `Est: ~${m.estPubBulanan}` : `${m.pubActiveDays} hr tayang`}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[10px] font-semibold text-gray-500">
+                              <span>Sisa Mentahan: <strong className="text-gray-800">{m.mentahanBelumDipakai} raw</strong></span>
+                              <span>Target 15/hr</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  m.powerPercentage >= 100 ? 'bg-emerald-500' : m.powerPercentage >= 75 ? 'bg-blue-500' : 'bg-amber-500'
+                                }`}
+                                style={{ width: `${barWidth}%` }}
+                              />
+                            </div>
+                          </div>
                         </div>
-                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              m.powerPercentage >= 100 ? 'bg-emerald-500' : m.powerPercentage >= 75 ? 'bg-blue-500' : 'bg-amber-500'
-                            }`}
-                            style={{ width: `${barWidth}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>
