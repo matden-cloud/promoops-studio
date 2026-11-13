@@ -4,7 +4,7 @@ import {
   LayoutDashboard, BarChart2,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check
+  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity
 } from 'lucide-react';
 
 const DEFAULT_VIOLATION_TYPES = [
@@ -27,7 +27,6 @@ const EMPTY_VIOLATION_FORM = {
   screenshots: []
 };
 
-// Helper merapikan nama orang di frontend agar "rahmat" & "Rahmat" selalu menyatu jadi "Rahmat"
 const normalizePersonName = (nameStr) => {
   if (!nameStr) return '';
   const s = String(nameStr).trim();
@@ -67,6 +66,14 @@ const formatIsoMonthLabel = (ym) => {
   return `📅 ${d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} (${ym})`;
 };
 
+const formatShortMonthTitle = (ym) => {
+  if (!ym || ym === 'Tanpa Tanggal') return 'Tanpa Tanggal';
+  const [yr, mo] = ym.split('-');
+  const d = new Date(parseInt(yr, 10), parseInt(mo, 10) - 1, 1);
+  if (isNaN(d.getTime())) return ym;
+  return d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
+};
+
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
@@ -102,11 +109,9 @@ export default function App() {
   const [sortBy, setSortBy] = useState('mentahan');
   const [onlyWinning, setOnlyWinning] = useState(false);
 
-  // --- STATE PENYIMPANAN BINTANG PER PRODUK ("Data_Winning_Web") ---
+  // --- STATE PENYIMPANAN BINTANG PER PRODUK & PER FILE ---
   const [winningWebMap, setWinningWebMap] = useState({});
   const [savingProductKey, setSavingProductKey] = useState(null);
-
-  // --- STATE PENYIMPANAN BINTANG PER FILE INDIVIDUAL ("Data_Winning_Files") ---
   const [winningFilesMap, setWinningFilesMap] = useState({});
   const [savingFileKey, setSavingFileKey] = useState(null);
   const [onlyWinningInModal, setOnlyWinningInModal] = useState(false);
@@ -206,7 +211,6 @@ export default function App() {
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
 
-  // Peta cepat dari AKN_001 -> "AKN_001 - Jual Kawat"
   const accountLookup = useMemo(() => {
     const map = {};
     masterAccounts.forEach(acc => {
@@ -291,7 +295,7 @@ export default function App() {
     setTimeout(() => setSavingFileKey(null), 700);
   };
 
-  // --- DAFTAR PILIHAN FILTER DINAMIS & RAPI TANPA DOUBLE ---
+  // --- DAFTAR PILIHAN FILTER DINAMIS ---
   const availableMonthsRekap = useMemo(() => {
     const months = new Set();
     rawAssets.forEach(r => { if (r.month && r.month !== 'Tanpa Tanggal') months.add(r.month); });
@@ -308,9 +312,8 @@ export default function App() {
     return ['Semua', ...Array.from(prods).sort()];
   }, [rawAssets, klipVideos, publishVideos]);
 
-  // Pisahkan daftar Nama Anggota Tim (tanpa double huruf besar/kecil) dan Daftar Akun Toko (MASTER_AKUN)
   const { personOptions, accountOptions } = useMemo(() => {
-    const peopleMap = {}; // lowercase -> Proper Case ("Deni", "Rahmat", "Tatang", "Isan", "Rizal")
+    const peopleMap = {};
     const addPerson = (val) => {
       if (!val) return;
       const clean = normalizePersonName(val);
@@ -328,6 +331,169 @@ export default function App() {
       accountOptions: masterAccounts
     };
   }, [rawAssets, klipVideos, publishVideos, masterAccounts]);
+
+  // =========================================================================
+  // KOTAK POWER & ESTIMASI KEKUATAN SELURUH BULAN (MENTAHAN, PRODUKSI, PUBLISH)
+  // =========================================================================
+  const monthlyPowerCards = useMemo(() => {
+    const map = {};
+    const ensureMonth = (ym) => {
+      if (!ym || ym === 'Tanpa Tanggal') return null;
+      if (!map[ym]) {
+        const [yr, mo] = ym.split('-');
+        const daysInMonth = new Date(parseInt(yr, 10), parseInt(mo, 10), 0).getDate() || 30;
+        map[ym] = {
+          month: ym,
+          title: formatShortMonthTitle(ym),
+          daysInMonth,
+          mentahan: 0,
+          mentahanBelumDipakai: 0,
+          produksi: 0,
+          publish: 0,
+          activeDatesSet: new Set(),
+          rawDatesSet: new Set(),
+          klipDatesSet: new Set(),
+          pubDatesSet: new Set(),
+          rawFiles: [],
+          klipFiles: [],
+          uploadFiles: []
+        };
+      }
+      return map[ym];
+    };
+
+    // Saring berdasarkan Filter Produk & Tim jika sedang dipilih (namun tampilkan SELURUH bulan)
+    rawAssets.forEach((r, idx) => {
+      const mProduk = rekapProduk === 'Semua' || r.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || normalizePersonName(r.creator).toLowerCase() === rekapTim.toLowerCase();
+      if (!mProduk || !mTim) return;
+
+      const m = ensureMonth(r.month);
+      if (!m) return;
+      m.mentahan += 1;
+      if (r.status === 'Belum Dipakai') m.mentahanBelumDipakai += 1;
+      if (r.date) {
+        m.activeDatesSet.add(r.date);
+        m.rawDatesSet.add(r.date);
+      }
+      m.rawFiles.push({
+        fileKey: `RAW__${r.id || r.fileName || idx}`,
+        kategori: 'Mentahan (Raw_Asset)',
+        produk: r.produk,
+        name: `${r.fileName} (${r.produk})`,
+        status: r.status || 'Mentahan',
+        owner: `${normalizePersonName(r.creator) || 'Riset'} • ${r.date || ''}`,
+        url: r.url || 'https://onedrive.live.com/'
+      });
+    });
+
+    klipVideos.forEach((k, idx) => {
+      const mProduk = rekapProduk === 'Semua' || k.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || 
+        normalizePersonName(k.editor).toLowerCase() === rekapTim.toLowerCase() || 
+        (k.akunTarget || '').toUpperCase() === rekapTim.toUpperCase();
+      if (!mProduk || !mTim) return;
+
+      const m = ensureMonth(k.month);
+      if (!m) return;
+      m.produksi += 1;
+      if (k.date) {
+        m.activeDatesSet.add(k.date);
+        m.klipDatesSet.add(k.date);
+      }
+      m.klipFiles.push({
+        fileKey: `KLIP__${k.id || k.fileName || idx}`,
+        kategori: 'Video Final (Klip_Vidio)',
+        produk: k.produk,
+        name: `${k.fileName} (${k.produk})`,
+        status: `Selesai Edit (${k.date || '-'})`,
+        owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
+        url: k.url || 'https://onedrive.live.com/'
+      });
+    });
+
+    const sourcePub = publishVideos.length > 0 ? publishVideos : data.map((u, idx) => ({
+      id: idx + 1,
+      fileName: u.Induk_Barang || 'Video TikTok',
+      url: u.Link_Postingan,
+      date: u._isoDate,
+      month: u._month,
+      akun: u.Id_Akun || '',
+      uploader: normalizePersonName(u.Nama_Akun || u.Id_Akun || 'Publisher'),
+      produk: String(u.Induk_Barang || 'Tanpa Produk').trim(),
+      status: u.Video_FYP || 'Sukses'
+    }));
+
+    sourcePub.forEach((p, idx) => {
+      const mProduk = rekapProduk === 'Semua' || p.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || 
+        normalizePersonName(p.uploader).toLowerCase() === rekapTim.toLowerCase() || 
+        (p.akun || '').toUpperCase() === rekapTim.toUpperCase();
+      if (!mProduk || !mTim) return;
+
+      const m = ensureMonth(p.month);
+      if (!m) return;
+      m.publish += 1;
+      if (p.date) {
+        m.activeDatesSet.add(p.date);
+        m.pubDatesSet.add(p.date);
+      }
+      const fullAkunLabel = accountLookup[(p.akun || '').toUpperCase()] || p.akunLabel || p.akun || '-';
+      m.uploadFiles.push({
+        fileKey: `PUBLISH__${p.id || p.url || idx}`,
+        kategori: 'Video Terupload (Publish)',
+        produk: p.produk,
+        name: `${p.fileName} (${p.produk})`,
+        status: `${p.status || 'Sukses'} (${p.date || '-'})`,
+        owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
+        url: p.url || 'https://www.tiktok.com/'
+      });
+    });
+
+    return Object.values(map)
+      .sort((a, b) => b.month.localeCompare(a.month))
+      .map(item => {
+        // Hitung rentang hari berjalan di bulan tersebut untuk menghitung Power /hari & Estimasi Bulanan
+        const allDates = Array.from(item.activeDatesSet).sort();
+        const maxDayNum = allDates.length > 0 ? parseInt(allDates[allDates.length - 1].split('-')[2], 10) : item.daysInMonth;
+        // Gunakan pembagi hari kerja/aktif yang realistis agar estimasi kekuatan akurat
+        const activeSpanDays = Math.max(maxDayNum, 1);
+        const workDaysRaw = Math.max(item.rawDatesSet.size, 1);
+        const workDaysKlip = Math.max(item.klipDatesSet.size, 1);
+        const workDaysPub = Math.max(item.pubDatesSet.size, 1);
+
+        // Kecepatan rata-rata per hari aktif (Power Harian)
+        const powerRawPerHari = (item.mentahan / workDaysRaw).toFixed(1);
+        const powerKlipPerHari = (item.produksi / workDaysKlip).toFixed(1);
+        const powerPubPerHari = (item.publish / workDaysPub).toFixed(1);
+
+        // Estimasi Kekuatan Penuh 1 Bulan (berdasarkan laju hari berjalan / 26 hari kerja)
+        const isCurrentMonth = maxDayNum < item.daysInMonth - 2;
+        const estRawBulanan = isCurrentMonth ? Math.round((item.mentahan / activeSpanDays) * item.daysInMonth) : item.mentahan;
+        const estKlipBulanan = isCurrentMonth ? Math.round((item.produksi / activeSpanDays) * item.daysInMonth) : item.produksi;
+        const estPubBulanan = isCurrentMonth ? Math.round((item.publish / activeSpanDays) * item.daysInMonth) : item.publish;
+
+        // Target bulanan standar (15 video/hari x jumlah hari berjalan)
+        const targetBerjalan = workDaysPub * 15;
+        const powerPercentage = item.publish > 0 ? Math.round((item.publish / targetBerjalan) * 100) : 0;
+
+        return {
+          ...item,
+          activeDaysCount: allDates.length,
+          rawActiveDays: item.rawDatesSet.size,
+          klipActiveDays: item.klipDatesSet.size,
+          pubActiveDays: item.pubDatesSet.size,
+          powerRawPerHari,
+          powerKlipPerHari,
+          powerPubPerHari,
+          estRawBulanan,
+          estKlipBulanan,
+          estPubBulanan,
+          isCurrentMonth,
+          powerPercentage
+        };
+      });
+  }, [rawAssets, klipVideos, publishVideos, data, rekapProduk, rekapTim, accountLookup]);
 
   // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD ---
   const filteredRawList = useMemo(() => {
@@ -769,17 +935,19 @@ export default function App() {
     setIsAiThinking(true);
     setAiResponse('');
 
+    const monthlyPowerSummary = monthlyPowerCards.map(m => 
+      `${m.title}: Mentahan=${m.mentahan} (${m.powerRawPerHari}/hr, Est:${m.estRawBulanan}), Produksi=${m.produksi} (${m.powerKlipPerHari}/hr, Est:${m.estKlipBulanan}), Publish=${m.publish} (${m.powerPubPerHari}/hr, Power:${m.powerPercentage}%)`
+    ).join(' | ');
     const topProdsText = aggregatedProducts.slice(0, 8).map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'}, FileBerbintang:${p.starredFilesCount})`).join('; ');
-    const recentDaysText = aggregatedDaily.slice(0, 7).map(d => `${d.labelTanggal} (Raw:${d.mentahan}, Edit:${d.diedit}, Upload:${d.upload}/${d.target})`).join('; ');
 
     const dashboardContext = `
       Konteks Data Asli Web PromoOps Studio Saat Ini:
       - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim/Akun ${rekapTim}.
-      - Total Mentahan (Raw_Asset + Kolom N FILE_ASSET): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
-      - Total Video Final (Klip_Vidio Selesai Edit): ${totalFinalRekap} klip.
-      - Total Upload (Sheet Publish): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
+      - Rekap Power Kekuatan Seluruh Bulan: ${monthlyPowerSummary}.
+      - Total Mentahan Terfilter: ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
+      - Total Video Final Terfilter: ${totalFinalRekap} klip.
+      - Total Upload Terfilter: ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
       - 8 Produk Teratas: ${topProdsText}.
-      - 7 Hari Terakhir: ${recentDaysText}.
       - Total Pelanggaran Tercatat: ${violations.length} kasus.
     `;
 
@@ -797,16 +965,12 @@ export default function App() {
       if (!GEMINI_API_KEY || GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
         setTimeout(() => {
           setAiResponse(
-            `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
-            `**1. Kekuatan Produksi & Stok Mentahan (Data Real-Time Sheets)**\n` +
-            `* **Total Aset Mentahan (Raw_Asset):** Tercatat **${totalMentahanRekap} file** di OneDrive (${totalBelumDipakaiRekap} belum dipakai & ${totalDipakaiRekap} sudah dipakai).\n` +
-            `* **Kinerja Editor (Klip_Vidio):** Menghasilkan **${totalFinalRekap} klip selesai edit**.\n` +
-            `* **Distribusi Publisher (Sheet Publish):** Berhasil menayangkan **${totalUploadRekap} video**.\n\n` +
-            `**2. Peringkat Produk Terbanyak & Winning Web**\n` +
+            `**RINGKASAN EKSEKUTIF & POWER BULANAN PROMOOPS STUDIO**\n\n` +
+            `**1. Power Kekuatan per Bulan (Mentahan, Produksi, Publish)**\n` +
+            monthlyPowerCards.map(m => `* **${m.title}:** Mentahan **${m.mentahan}** (${m.powerRawPerHari}/hr) • Produksi **${m.produksi}** (${m.powerKlipPerHari}/hr) • Publish **${m.publish}** (${m.powerPubPerHari}/hr — Power Target **${m.powerPercentage}%**)`).join('\n') +
+            `\n\n**2. Peringkat Produk Terbanyak**\n` +
             `* Produk tertinggi dipimpin oleh **${aggregatedProducts[0]?.produk || '-'}** (${aggregatedProducts[0]?.mentahan || 0} mentahan, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).\n` +
-            `* Produk yang ditandai Bagus (⭐): **${aggregatedProducts.filter(p => p.isWinning || p.starredFilesCount > 0).map(p => `${p.produk} (${p.starredFilesCount} file berbintang)`).join(', ') || 'Belum ada'}**.\n\n` +
-            `**3. Evaluasi Pelanggaran**\n` +
-            `* Tercatat **${violations.length} kasus pelanggaran** yang sedang dikelola oleh tim.`
+            `* Produk yang ditandai Bagus (⭐): **${aggregatedProducts.filter(p => p.isWinning || p.starredFilesCount > 0).map(p => `${p.produk} (${p.starredFilesCount} file berbintang)`).join(', ') || 'Belum ada'}**.`
           );
           setIsAiThinking(false);
         }, 600);
@@ -830,8 +994,7 @@ export default function App() {
           `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
           `* **Total Mentahan:** ${totalMentahanRekap} file (${totalBelumDipakaiRekap} siap pakai).\n` +
           `* **Total Produksi (Video Final):** ${totalFinalRekap} video selesai diedit.\n` +
-          `* **Total Upload (Sheet Publish):** ${totalUploadRekap} video tayang.\n` +
-          `* **Produk Terbanyak:** ${aggregatedProducts[0]?.produk || '-'} (${aggregatedProducts[0]?.mentahan || 0} raw, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).`
+          `* **Total Upload (Sheet Publish):** ${totalUploadRekap} video tayang.`
         );
       }
     } catch (err) {
@@ -1090,16 +1253,16 @@ export default function App() {
             <div className="p-5 overflow-y-auto flex-1 space-y-4 bg-gray-50">
               <div className="flex flex-wrap gap-2">
                 <button 
-                  onClick={() => askAiAboutDashboard("Buatkan draft poin-poin slide PPT laporan bulanan dari data web saat ini")}
+                  onClick={() => askAiAboutDashboard("Buatkan draft poin-poin slide PPT laporan bulanan beserta analisa power produksi & publish setiap bulan")}
                   className="text-xs bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-3 py-2 rounded-xl shadow-sm transition-colors"
                 >
                   📊 Buat Poin Slide PPT Laporan Bulan Ini
                 </button>
                 <button 
-                  onClick={() => askAiAboutDashboard("Analisa kekuatan tim dan bottleneck antara jumlah mentahan, video final editor, dan upload publisher")}
+                  onClick={() => askAiAboutDashboard("Bandingkan power kekuatan mentahan, produksi editor, dan publish antar bulan serta bottleneck-nya")}
                   className="text-xs bg-white hover:bg-blue-50 text-blue-800 border border-blue-200 font-bold px-3 py-2 rounded-xl shadow-sm transition-colors"
                 >
-                  ⚡ Evaluasi Kekuatan Tim & Bottleneck
+                  ⚡ Evaluasi Power Bulanan & Bottleneck
                 </button>
                 <button 
                   onClick={() => askAiAboutDashboard("Rekomendasikan produk mana yang harus difokuskan minggu depan berdasarkan stok mentahan dan winning asset")}
@@ -1323,7 +1486,7 @@ export default function App() {
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
               <p className="text-gray-500 mt-1">
-                Nama produk diambil dari <span className="font-semibold text-gray-700">Id_Induk_Barang (Project)</span>, Tanggal Mentahan dari <span className="font-semibold text-gray-700">Kolom N (FILE_ASSET)</span>, & Akun dari <span className="font-semibold text-gray-700">MASTER_AKUN</span>.
+                Folder aktif: <span className="font-semibold text-gray-700">Project Baru/Mentahan Video</span> & <span className="font-semibold text-gray-700">Video Final</span>. Klik kotak bulan atau angka untuk melihat rincian file.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 print:hidden">
@@ -1337,7 +1500,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 1. FILTER TERPADU DINAMIS & RAPI */}
+          {/* 1. FILTER TERPADU DINAMIS */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 print:hidden">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Bulan</label>
@@ -1372,7 +1535,6 @@ export default function App() {
               </select>
             </div>
 
-            {/* DROPDOWN KREATOR / EDITOR / AKUN TOKO YANG RAPI & TIDAK DOUBLE */}
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tim / Akun Toko</label>
               <select value={rekapTim} onChange={(e) => setRekapTim(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
@@ -1393,7 +1555,147 @@ export default function App() {
             </div>
           </div>
 
-          {/* 2. TIGA KARTU TOTAL SESUAI FILTER */}
+          {/* ========================================================================= */}
+          {/* 2. KOTAK KHUSUS SELURUH BULAN & ESTIMASI POWER KEKUATAN                   */}
+          {/* ========================================================================= */}
+          <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 pb-3 border-b border-gray-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-emerald-50 text-emerald-700 rounded-lg">
+                  <Activity className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-gray-900 text-sm md:text-base">
+                    Power & Estimasi Kekuatan per Bulan (Seluruh Bulan)
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Menampilkan kecepatan rata-rata harian (<span className="font-semibold text-gray-700">file/hari aktif</span>) dan estimasi kapasitas penuh di setiap bulan. Klik kotak bulan untuk memfilter.
+                  </p>
+                </div>
+              </div>
+              {rekapBulan !== 'Semua' && (
+                <button
+                  onClick={() => setRekapBulan('Semua')}
+                  className="text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg self-start sm:self-auto transition-colors"
+                >
+                  Tampilkan Semua Bulan
+                </button>
+              )}
+            </div>
+
+            {loading && monthlyPowerCards.length === 0 ? (
+              <div className="py-8 text-center text-gray-400 text-sm font-semibold">
+                Menghitung kekuatan Mentahan, Produksi, dan Publish di seluruh bulan...
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {monthlyPowerCards.map((m) => {
+                  const isSelected = rekapBulan === m.month;
+                  const barWidth = Math.min(m.powerPercentage, 100);
+                  return (
+                    <div
+                      key={m.month}
+                      onClick={() => setRekapBulan(isSelected ? 'Semua' : m.month)}
+                      className={`rounded-xl p-4 border transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-50/40 border-emerald-500 ring-2 ring-emerald-200 shadow-md'
+                          : 'bg-gray-50/60 hover:bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm'
+                      }`}
+                    >
+                      {/* Header Bulan & Badge Power Publish */}
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Calendar className={`w-4 h-4 ${isSelected ? 'text-emerald-600' : 'text-gray-500'}`} />
+                          <span className="font-black text-gray-900 text-sm md:text-base">{m.title}</span>
+                        </div>
+                        <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${
+                          m.powerPercentage >= 100
+                            ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                            : m.powerPercentage >= 75
+                            ? 'bg-blue-100 text-blue-800 border-blue-300'
+                            : 'bg-amber-100 text-amber-800 border-amber-300'
+                        }`}>
+                          ⚡ Power Publish: {m.powerPercentage}%
+                        </span>
+                      </div>
+
+                      {/* 3 Kotak Metrik Utama di Dalam Bulan: Mentahan, Produksi, Publish */}
+                      <div className="grid grid-cols-3 gap-2 text-center mb-3">
+                        {/* Mentahan */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRealFilesModal(m.title, 'Mentahan (Raw_Asset)', m.rawFiles);
+                          }}
+                          className="bg-white p-2.5 rounded-lg border border-blue-100 hover:border-blue-400 transition-colors"
+                          title="Klik untuk membuka file Mentahan bulan ini"
+                        >
+                          <p className="text-[10px] font-bold text-blue-600 uppercase">1. Mentahan</p>
+                          <p className="text-xl font-black text-gray-900 mt-0.5 underline decoration-dotted decoration-blue-400">{m.mentahan}</p>
+                          <p className="text-[11px] font-bold text-blue-700 mt-0.5">⚡ {m.powerRawPerHari}/hr</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            {m.isCurrentMonth ? `Est: ~${m.estRawBulanan}` : `${m.rawActiveDays} hr aktif`}
+                          </p>
+                        </div>
+
+                        {/* Produksi / Video Final */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRealFilesModal(m.title, 'Produksi (Klip_Vidio)', m.klipFiles);
+                          }}
+                          className="bg-white p-2.5 rounded-lg border border-amber-100 hover:border-amber-400 transition-colors"
+                          title="Klik untuk membuka file Video Final bulan ini"
+                        >
+                          <p className="text-[10px] font-bold text-amber-600 uppercase">2. Produksi</p>
+                          <p className="text-xl font-black text-gray-900 mt-0.5 underline decoration-dotted decoration-amber-400">{m.produksi}</p>
+                          <p className="text-[11px] font-bold text-amber-700 mt-0.5">⚡ {m.powerKlipPerHari}/hr</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            {m.isCurrentMonth ? `Est: ~${m.estKlipBulanan}` : `${m.klipActiveDays} hr edit`}
+                          </p>
+                        </div>
+
+                        {/* Publish / Upload */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRealFilesModal(m.title, 'Publish (Tayang)', m.uploadFiles);
+                          }}
+                          className="bg-white p-2.5 rounded-lg border border-emerald-100 hover:border-emerald-400 transition-colors"
+                          title="Klik untuk membuka video Publish bulan ini"
+                        >
+                          <p className="text-[10px] font-bold text-emerald-600 uppercase">3. Publish</p>
+                          <p className="text-xl font-black text-gray-900 mt-0.5 underline decoration-dotted decoration-emerald-400">{m.publish}</p>
+                          <p className="text-[11px] font-bold text-emerald-700 mt-0.5">⚡ {m.powerPubPerHari}/hr</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            {m.isCurrentMonth ? `Est: ~${m.estPubBulanan}` : `${m.pubActiveDays} hr tayang`}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Progress Bar Kapasitas Harian & Stok Sisa */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between text-[11px] font-semibold text-gray-500">
+                          <span>Sisa Mentahan: <strong className="text-gray-800">{m.mentahanBelumDipakai} raw</strong></span>
+                          <span>Rata-rata vs Target 15/hr</span>
+                        </div>
+                        <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              m.powerPercentage >= 100 ? 'bg-emerald-500' : m.powerPercentage >= 75 ? 'bg-blue-500' : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${barWidth}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 3. TIGA KARTU TOTAL SESUAI FILTER AKTIF */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div 
               onClick={() => openRealFilesModal(
@@ -1450,7 +1752,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 3. DUA TABEL UTAMA */}
+          {/* 4. DUA TABEL UTAMA */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
             {/* TABEL KIRI: PERINGKAT PER PRODUK */}
@@ -1838,7 +2140,6 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-              {/* PILIHAN AKUN DARI MASTER_AKUN */}
               <select 
                 value={newViolation.akun} 
                 onChange={(e) => setNewViolation({...newViolation, akun: e.target.value})}
