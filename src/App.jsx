@@ -27,6 +27,14 @@ const EMPTY_VIOLATION_FORM = {
   screenshots: []
 };
 
+// Helper merapikan nama orang di frontend agar "rahmat" & "Rahmat" selalu menyatu jadi "Rahmat"
+const normalizePersonName = (nameStr) => {
+  if (!nameStr) return '';
+  const s = String(nameStr).trim();
+  if (!s || /^AKN_/i.test(s)) return s.toUpperCase();
+  return s.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+};
+
 const normalizeDateToIso = (dateVal) => {
   if (!dateVal) return '';
   const s = String(dateVal).trim();
@@ -63,10 +71,19 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
   // --- STATE DATA ASLI DARI GOOGLE SHEETS ---
-  const [data, setData] = useState([]);               // Data_View (Laporan FYP)
-  const [rawAssets, setRawAssets] = useState([]);     // Raw_Asset + FILE_ASSET (Kolom N)
-  const [klipVideos, setKlipVideos] = useState([]);   // Klip_Vidio (Kolom G)
-  const [publishVideos, setPublishVideos] = useState([]); // Publish (Kolom B)
+  const [data, setData] = useState([]);
+  const [rawAssets, setRawAssets] = useState([]);
+  const [klipVideos, setKlipVideos] = useState([]);
+  const [publishVideos, setPublishVideos] = useState([]);
+  const [masterAccounts, setMasterAccounts] = useState([
+    { id: 'AKN_001', nama: 'Jual Kawat', label: 'AKN_001 - Jual Kawat', pemegang: 'Deni' },
+    { id: 'AKN_002', nama: 'Produk Andalan Kita', label: 'AKN_002 - Produk Andalan Kita', pemegang: 'Rizal' },
+    { id: 'AKN_003', nama: 'Grosir Hitam', label: 'AKN_003 - Grosir Hitam', pemegang: 'Isan' },
+    { id: 'AKN_004', nama: 'Melifarida Toserba', label: 'AKN_004 - Melifarida Toserba', pemegang: '' },
+    { id: 'AKN_005', nama: 'Pasar Digitals', label: 'AKN_005 - Pasar Digitals', pemegang: 'Rizal' },
+    { id: 'AKN_006', nama: 'Hasil Seleksi', label: 'AKN_006 - Hasil Seleksi', pemegang: '' },
+  ]);
+  const [productGroups, setProductGroups] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isBotRunning, setIsBotRunning] = useState(false);
@@ -145,6 +162,10 @@ export default function App() {
         if (Array.isArray(result.rawAssets)) setRawAssets(result.rawAssets);
         if (Array.isArray(result.klipVideos)) setKlipVideos(result.klipVideos);
         if (Array.isArray(result.publishVideos)) setPublishVideos(result.publishVideos);
+        if (Array.isArray(result.masterAccounts) && result.masterAccounts.length > 0) {
+          setMasterAccounts(result.masterAccounts);
+        }
+        if (result.productGroups) setProductGroups(result.productGroups);
 
         if (result.violations && result.violations.length > 0) {
           setViolations(result.violations);
@@ -185,6 +206,15 @@ export default function App() {
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
 
+  // Peta cepat dari AKN_001 -> "AKN_001 - Jual Kawat"
+  const accountLookup = useMemo(() => {
+    const map = {};
+    masterAccounts.forEach(acc => {
+      map[acc.id.toUpperCase()] = acc.label;
+    });
+    return map;
+  }, [masterAccounts]);
+
   const getWinningKey = (produkName) => `${rekapBulan}__${produkName}`;
 
   const getProductWinningInfo = (produkName) => {
@@ -195,7 +225,6 @@ export default function App() {
     return { isWinning: false, catatan: '' };
   };
 
-  // --- SIMPAN BINTANG & CATATAN PER PRODUK KE "Data_Winning_Web" ---
   const saveProductWinningToSheet = async (item, newIsWinning, newCatatan) => {
     const key = getWinningKey(item.produk);
     setSavingProductKey(item.produk);
@@ -230,7 +259,6 @@ export default function App() {
     setTimeout(() => setSavingProductKey(null), 700);
   };
 
-  // --- SIMPAN BINTANG & CATATAN PER FILE INDIVIDUAL KE "Data_Winning_Files" ---
   const saveFileWinningToSheet = async (fileObj, newIsWinning, newCatatan) => {
     const fKey = fileObj.fileKey;
     setSavingFileKey(fKey);
@@ -263,7 +291,7 @@ export default function App() {
     setTimeout(() => setSavingFileKey(null), 700);
   };
 
-  // --- DAFTAR PILIHAN FILTER DINAMIS DARI SHEET ASLI ---
+  // --- DAFTAR PILIHAN FILTER DINAMIS & RAPI TANPA DOUBLE ---
   const availableMonthsRekap = useMemo(() => {
     const months = new Set();
     rawAssets.forEach(r => { if (r.month && r.month !== 'Tanpa Tanggal') months.add(r.month); });
@@ -280,24 +308,34 @@ export default function App() {
     return ['Semua', ...Array.from(prods).sort()];
   }, [rawAssets, klipVideos, publishVideos]);
 
-  const availableTeamsRekap = useMemo(() => {
-    const teams = new Set();
-    rawAssets.forEach(r => { if (r.creator) teams.add(r.creator); });
-    klipVideos.forEach(k => { if (k.editor) teams.add(k.editor); });
-    publishVideos.forEach(p => { 
-      if (p.uploader) teams.add(p.uploader);
-      if (p.akun) teams.add(p.akun);
-    });
-    return ['Semua', ...Array.from(teams).sort()];
-  }, [rawAssets, klipVideos, publishVideos]);
+  // Pisahkan daftar Nama Anggota Tim (tanpa double huruf besar/kecil) dan Daftar Akun Toko (MASTER_AKUN)
+  const { personOptions, accountOptions } = useMemo(() => {
+    const peopleMap = {}; // lowercase -> Proper Case ("Deni", "Rahmat", "Tatang", "Isan", "Rizal")
+    const addPerson = (val) => {
+      if (!val) return;
+      const clean = normalizePersonName(val);
+      if (!clean || /^AKN_/i.test(clean) || clean === 'Tim Riset' || clean === 'Editor' || clean === 'Publisher') return;
+      peopleMap[clean.toLowerCase()] = clean;
+    };
 
-  // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD (DARI SHEET PUBLISH) ---
+    rawAssets.forEach(r => addPerson(r.creator));
+    klipVideos.forEach(k => addPerson(k.editor));
+    publishVideos.forEach(p => addPerson(p.uploader));
+    masterAccounts.forEach(a => addPerson(a.pemegang));
+
+    return {
+      personOptions: Object.values(peopleMap).sort(),
+      accountOptions: masterAccounts
+    };
+  }, [rawAssets, klipVideos, publishVideos, masterAccounts]);
+
+  // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD ---
   const filteredRawList = useMemo(() => {
     return rawAssets.filter(r => {
       const mBulan = rekapBulan === 'Semua' || r.month === rekapBulan;
       const mTanggal = !rekapTanggal || r.date === rekapTanggal;
       const mProduk = rekapProduk === 'Semua' || r.produk === rekapProduk;
-      const mTim = rekapTim === 'Semua' || (r.creator || '').toLowerCase() === rekapTim.toLowerCase();
+      const mTim = rekapTim === 'Semua' || normalizePersonName(r.creator).toLowerCase() === rekapTim.toLowerCase();
       return mBulan && mTanggal && mProduk && mTim;
     });
   }, [rawAssets, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
@@ -307,13 +345,14 @@ export default function App() {
       const mBulan = rekapBulan === 'Semua' || k.month === rekapBulan;
       const mTanggal = !rekapTanggal || k.date === rekapTanggal;
       const mProduk = rekapProduk === 'Semua' || k.produk === rekapProduk;
-      const mTim = rekapTim === 'Semua' || (k.editor || '').toLowerCase() === rekapTim.toLowerCase() || (k.akunTarget || '').toLowerCase() === rekapTim.toLowerCase();
+      const mTim = rekapTim === 'Semua' || 
+        normalizePersonName(k.editor).toLowerCase() === rekapTim.toLowerCase() || 
+        (k.akunTarget || '').toUpperCase() === rekapTim.toUpperCase();
       return mBulan && mTanggal && mProduk && mTim;
     });
   }, [klipVideos, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
 
   const filteredUploadList = useMemo(() => {
-    // Jika sheet Publish sudah terbaca, gunakan sheet Publish; jika belum, fallback ke Data_View
     const sourceList = publishVideos.length > 0 ? publishVideos : data.map((u, idx) => ({
       id: idx + 1,
       fileName: u.Induk_Barang || 'Video TikTok',
@@ -321,7 +360,7 @@ export default function App() {
       date: u._isoDate,
       month: u._month,
       akun: u.Id_Akun || '',
-      uploader: u.Nama_Akun || u.Id_Akun || 'Publisher',
+      uploader: normalizePersonName(u.Nama_Akun || u.Id_Akun || 'Publisher'),
       produk: String(u.Induk_Barang || 'Tanpa Produk').trim(),
       status: u.Video_FYP || 'Sukses'
     }));
@@ -331,8 +370,8 @@ export default function App() {
       const mTanggal = !rekapTanggal || p.date === rekapTanggal;
       const mProduk = rekapProduk === 'Semua' || p.produk === rekapProduk;
       const mTim = rekapTim === 'Semua' || 
-        (p.uploader || '').toLowerCase() === rekapTim.toLowerCase() || 
-        (p.akun || '').toLowerCase() === rekapTim.toLowerCase();
+        normalizePersonName(p.uploader).toLowerCase() === rekapTim.toLowerCase() || 
+        (p.akun || '').toUpperCase() === rekapTim.toUpperCase();
       return mBulan && mTanggal && mProduk && mTim;
     });
   }, [publishVideos, data, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
@@ -346,6 +385,7 @@ export default function App() {
         const winInfo = getProductWinningInfo(key);
         map[key] = {
           produk: key,
+          groupLabel: productGroups[key] || '',
           mentahan: 0,
           belumDipakai: 0,
           dipakai: 0,
@@ -368,7 +408,8 @@ export default function App() {
       entry.mentahan += 1;
       if (r.status === 'Belum Dipakai') entry.belumDipakai += 1;
       else entry.dipakai += 1;
-      if (r.creator) entry.creators.add(r.creator);
+      const cleanCreator = normalizePersonName(r.creator);
+      if (cleanCreator) entry.creators.add(cleanCreator);
 
       const fileKey = `RAW__${r.id || r.fileName || idx}`;
       if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
@@ -379,7 +420,7 @@ export default function App() {
         produk: r.produk,
         name: r.fileName || r.id,
         status: r.status || 'Mentahan',
-        owner: `${r.creator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
+        owner: `${cleanCreator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
         url: r.url || 'https://onedrive.live.com/'
       });
     });
@@ -387,7 +428,8 @@ export default function App() {
     filteredKlipList.forEach((k, idx) => {
       const entry = ensureProd(k.produk);
       entry.videoFinal += 1;
-      if (k.editor) entry.creators.add(k.editor);
+      const cleanEditor = normalizePersonName(k.editor);
+      if (cleanEditor) entry.creators.add(cleanEditor);
 
       const fileKey = `KLIP__${k.id || k.fileName || idx}`;
       if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
@@ -398,7 +440,7 @@ export default function App() {
         produk: k.produk,
         name: k.fileName || k.id,
         status: `Selesai Edit (${k.date || '-'})`,
-        owner: `Editor: ${k.editor || '-'}`,
+        owner: `Editor: ${cleanEditor || '-'} • ${accountLookup[(k.akunTarget || '').toUpperCase()] || k.akunTarget || ''}`,
         url: k.url || 'https://onedrive.live.com/'
       });
     });
@@ -406,10 +448,13 @@ export default function App() {
     filteredUploadList.forEach((p, idx) => {
       const entry = ensureProd(p.produk);
       entry.upload += 1;
-      if (p.uploader) entry.creators.add(p.uploader);
+      const cleanUploader = normalizePersonName(p.uploader);
+      if (cleanUploader) entry.creators.add(cleanUploader);
 
       const fileKey = `PUBLISH__${p.id || p.url || idx}`;
       if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+
+      const fullAkunLabel = accountLookup[(p.akun || '').toUpperCase()] || p.akunLabel || p.akun || '-';
 
       entry.uploadFiles.push({
         fileKey,
@@ -417,7 +462,7 @@ export default function App() {
         produk: p.produk,
         name: `${p.fileName} (${p.produk})`,
         status: `${p.status || 'Sukses'} (${p.date || '-'})`,
-        owner: `${p.uploader || 'Publisher'} (${p.akun || '-'})`,
+        owner: `${cleanUploader || 'Publisher'} • ${fullAkunLabel}`,
         url: p.url || 'https://www.tiktok.com/'
       });
     });
@@ -425,7 +470,7 @@ export default function App() {
     return Object.values(map)
       .filter(item => !onlyWinning || item.isWinning || item.starredFilesCount > 0)
       .sort((a, b) => b[sortBy] - a[sortBy]);
-  }, [filteredRawList, filteredKlipList, filteredUploadList, winningWebMap, winningFilesMap, rekapBulan, onlyWinning, sortBy]);
+  }, [filteredRawList, filteredKlipList, filteredUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy]);
 
   // --- AGREGASI TABEL KANAN: TRACKING HARIAN ---
   const aggregatedDaily = useMemo(() => {
@@ -459,7 +504,7 @@ export default function App() {
         produk: r.produk,
         name: `${r.fileName} (${r.produk})`,
         status: r.status || 'Mentahan',
-        owner: r.creator || 'Riset',
+        owner: normalizePersonName(r.creator) || 'Riset',
         url: r.url || 'https://onedrive.live.com/'
       });
     });
@@ -474,7 +519,7 @@ export default function App() {
         produk: k.produk,
         name: `${k.fileName} (${k.produk})`,
         status: 'Selesai Edit',
-        owner: `Editor: ${k.editor || '-'}`,
+        owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
         url: k.url || 'https://onedrive.live.com/'
       });
     });
@@ -483,19 +528,20 @@ export default function App() {
       const d = ensureDate(p.date);
       if (!d) return;
       d.upload += 1;
+      const fullAkunLabel = accountLookup[(p.akun || '').toUpperCase()] || p.akunLabel || p.akun || '-';
       d.uploadFiles.push({
         fileKey: `PUBLISH__${p.id || p.url || idx}`,
         kategori: 'Video Terupload (Publish)',
         produk: p.produk,
         name: `${p.fileName} (${p.produk})`,
         status: p.status || 'Sukses',
-        owner: `${p.uploader || 'Publisher'} (${p.akun || '-'})`,
+        owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
         url: p.url || 'https://www.tiktok.com/'
       });
     });
 
     return Object.values(map).sort((a, b) => b.tanggal.localeCompare(a.tanggal));
-  }, [filteredRawList, filteredKlipList, filteredUploadList]);
+  }, [filteredRawList, filteredKlipList, filteredUploadList, accountLookup]);
 
   const totalMentahanRekap = filteredRawList.length;
   const totalBelumDipakaiRekap = filteredRawList.filter(r => r.status === 'Belum Dipakai').length;
@@ -728,7 +774,7 @@ export default function App() {
 
     const dashboardContext = `
       Konteks Data Asli Web PromoOps Studio Saat Ini:
-      - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim ${rekapTim}.
+      - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim/Akun ${rekapTim}.
       - Total Mentahan (Raw_Asset + Kolom N FILE_ASSET): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
       - Total Video Final (Klip_Vidio Selesai Edit): ${totalFinalRekap} klip.
       - Total Upload (Sheet Publish): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
@@ -1277,7 +1323,7 @@ export default function App() {
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
               <p className="text-gray-500 mt-1">
-                Nama produk diambil dari <span className="font-semibold text-gray-700">Id_Induk_Barang (Project)</span>, Tanggal Mentahan dari <span className="font-semibold text-gray-700">Kolom N (FILE_ASSET)</span>, & Upload dari sheet <span className="font-semibold text-gray-700">Publish</span>.
+                Nama produk diambil dari <span className="font-semibold text-gray-700">Id_Induk_Barang (Project)</span>, Tanggal Mentahan dari <span className="font-semibold text-gray-700">Kolom N (FILE_ASSET)</span>, & Akun dari <span className="font-semibold text-gray-700">MASTER_AKUN</span>.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 print:hidden">
@@ -1291,7 +1337,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* 1. FILTER TERPADU DINAMIS DARI SHEET */}
+          {/* 1. FILTER TERPADU DINAMIS & RAPI */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 print:hidden">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Bulan</label>
@@ -1326,12 +1372,23 @@ export default function App() {
               </select>
             </div>
 
+            {/* DROPDOWN KREATOR / EDITOR / AKUN TOKO YANG RAPI & TIDAK DOUBLE */}
             <div>
-              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Kreator / Editor / Uploader</label>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tim / Akun Toko</label>
               <select value={rekapTim} onChange={(e) => setRekapTim(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
-                {availableTeamsRekap.map(t => (
-                  <option key={t} value={t}>{t === 'Semua' ? '👥 Semua Tim & Akun' : t}</option>
-                ))}
+                <option value="Semua">👥 Semua Tim & Akun Toko</option>
+                <optgroup label="👤 Anggota Tim (Kreator / Editor / Uploader)">
+                  {personOptions.map(person => (
+                    <option key={person} value={person}>👤 {person}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="📱 Akun Toko (MASTER_AKUN)">
+                  {accountOptions.map(acc => (
+                    <option key={acc.id} value={acc.id}>
+                      📱 {acc.label}{acc.pemegang ? ` (${acc.pemegang})` : ''}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
           </div>
@@ -1438,8 +1495,13 @@ export default function App() {
                                 <Star className={`w-4 h-4 transition-colors ${item.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
                               </button>
                               <div className="w-full">
-                                <div className="flex items-center gap-2 flex-wrap">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <p className="font-bold text-gray-900">{item.produk}</p>
+                                  {item.groupLabel && (
+                                    <span className="text-[10px] font-bold bg-gray-100 text-gray-700 border border-gray-200 px-1.5 py-0.5 rounded">
+                                      {item.groupLabel}
+                                    </span>
+                                  )}
                                   {item.starredFilesCount > 0 && (
                                     <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded-full">
                                       ⭐ {item.starredFilesCount} file bagus
@@ -1452,7 +1514,7 @@ export default function App() {
                                   )}
                                 </div>
                                 <span className="text-[11px] text-gray-400 font-medium block mb-1.5">
-                                  {Array.from(item.creators).slice(0, 3).join(', ') || 'Tim'} • Sisa {item.belumDipakai} raw
+                                  {Array.from(item.creators).slice(0, 4).join(', ') || 'Tim'} • Sisa {item.belumDipakai} raw
                                 </span>
                                 <input
                                   type="text"
@@ -1620,7 +1682,7 @@ export default function App() {
               {listBulan.map(b => <option key={b} value={b}>{b === 'Semua' ? '📅 Semua Bulan' : b}</option>)}
             </select>
             <select value={filterAkun} onChange={(e) => setFilterAkun(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg block p-2.5 font-semibold w-full sm:w-max">
-              {listAkun.map(a => <option key={a} value={a}>{a === 'Semua' ? '👤 Semua Akun' : a}</option>)}
+              {listAkun.map(a => <option key={a} value={a}>{a === 'Semua' ? '👤 Semua Akun' : (accountLookup[String(a).toUpperCase()] || a)}</option>)}
             </select>
             <select value={filterFyp} onChange={(e) => setFilterFyp(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-700 text-sm rounded-lg block p-2.5 font-semibold w-full sm:w-max">
               <option value="Semua">🔥 Semua Status</option>
@@ -1678,6 +1740,7 @@ export default function App() {
                     currentData.map((row, index) => {
                       const badgeStyle = getFypBadgeStyle(row.Video_FYP);
                       const isFyp = badgeStyle.icon !== null;
+                      const rawAkun = row.Nama_Akun || row.Id_Akun || '';
 
                       return (
                         <tr key={index} className="hover:bg-gray-50 transition-colors">
@@ -1689,7 +1752,7 @@ export default function App() {
                           </td>
                           <td className="px-4 py-4">
                             <span className="block px-2.5 py-1 rounded-md text-xs font-bold bg-white text-gray-700 border border-gray-300 w-max mb-1 shadow-sm">
-                              {row.Nama_Akun || row.Id_Akun}
+                              {accountLookup[String(rawAkun).toUpperCase()] || rawAkun}
                             </span>
                             <span className="text-xs text-gray-500 font-medium">{getBulanFormat(row.Tanggal_Upload)}</span>
                           </td>
@@ -1775,18 +1838,19 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+              {/* PILIHAN AKUN DARI MASTER_AKUN */}
               <select 
                 value={newViolation.akun} 
                 onChange={(e) => setNewViolation({...newViolation, akun: e.target.value})}
                 className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
                 required
               >
-                <option value="">Pilih Akun Terdampak...</option>
-                <option value="Akun 1 - Deni Rohmat">Akun 1 - Deni Rohmat</option>
-                <option value="Akun 2 - Ikhsan Harun">Akun 2 - Ikhsan Harun</option>
-                <option value="Akun 3 - Mochamad Rizal">Akun 3 - Mochamad Rizal</option>
-                <option value="Akun 4 - Publisher 4">Akun 4 - Publisher 4</option>
-                <option value="Akun 5 - Publisher 5">Akun 5 - Publisher 5</option>
+                <option value="">Pilih Akun Toko Terdampak...</option>
+                {accountOptions.map(acc => (
+                  <option key={acc.id} value={`${acc.label}${acc.pemegang ? ` (${acc.pemegang})` : ''}`}>
+                    {acc.label}{acc.pemegang ? ` (${acc.pemegang})` : ''}
+                  </option>
+                ))}
               </select>
 
               <input 
