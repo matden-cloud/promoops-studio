@@ -1800,7 +1800,7 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">{totalBelumDipakaiRekap} belum dipakai • {totalDipakaiRekap} dipakai</p>
               </div>
-              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">Kolom N</div>
+              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">Mentahan</div>
             </div>
 
             <div 
