@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   LayoutDashboard, BarChart2,
@@ -38,7 +38,7 @@ const normalizeDateToIso = (dateVal) => {
   if (!dateVal) return '';
   const s = String(dateVal).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const slashMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+  const slashMatch = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
   if (slashMatch) {
     let p1 = parseInt(slashMatch[1], 10);
     let p2 = parseInt(slashMatch[2], 10);
@@ -74,6 +74,30 @@ const formatShortMonthTitle = (ym) => {
   return d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 };
 
+const APPS_SCRIPT_ENDPOINT = '/api/apps-script';
+
+function createClientId(suffix) {
+  const stamp = Date.now();
+  return suffix === undefined ? stamp : `${stamp}_${suffix}`;
+}
+
+async function requestGemini(prompt, generationConfig) {
+  const response = await fetch('/api/gemini', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt,
+      temperature: generationConfig.temperature,
+      maxOutputTokens: generationConfig.maxOutputTokens,
+    }),
+  });
+  try {
+    return { response, result: await response.json() };
+  } catch {
+    return { response, result: null };
+  }
+}
+
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
@@ -92,7 +116,7 @@ export default function App() {
   ]);
   const [productGroups, setProductGroups] = useState({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [, setError] = useState(null);
   const [isBotRunning, setIsBotRunning] = useState(false);
   const [botReport, setBotReport] = useState(null); 
 
@@ -139,10 +163,6 @@ export default function App() {
   const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
   const [previewGallery, setPreviewGallery] = useState(null);
 
-  // ⚠️ API KEY & URL
-  const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-  const API_URL = "https://script.google.com/macros/s/AKfycbwTxa-MqVkrK65FPqNfR8ZglL17sZQ5QTExgQ0jtc_U--MXMoo4PrHnpOlpfmZQaS1n0g/exec";
-
   // STATE FILTER & PAGINATION ANALITIK FYP
   const [filterBulan, setFilterBulan] = useState('Semua');
   const [filterAkun, setFilterAkun] = useState('Semua');
@@ -154,7 +174,7 @@ export default function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(API_URL);
+      const response = await fetch(APPS_SCRIPT_ENDPOINT);
       const result = await response.json();
       if (result.status === "success") {
         const validData = (result.data || []).filter(item => 
@@ -207,14 +227,25 @@ export default function App() {
           setWinningFilesMap(mapWF);
         }
       }
-    } catch (err) {
+    } catch {
       setError("Terjadi kesalahan jaringan.");
     }
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
-  useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchData();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const filterSignature = `${filterBulan}|${filterAkun}|${filterFyp}`;
+  const [pageFilter, setPageFilter] = useState(filterSignature);
+  if (pageFilter !== filterSignature) {
+    setPageFilter(filterSignature);
+    setCurrentPage(1);
+  }
 
   const accountLookup = useMemo(() => {
     const map = {};
@@ -245,9 +276,9 @@ export default function App() {
     }));
 
     try {
-      await fetch(API_URL, {
+      await fetch(APPS_SCRIPT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'save_winning_web',
           data: {
@@ -278,9 +309,9 @@ export default function App() {
     }));
 
     try {
-      await fetch(API_URL, {
+      await fetch(APPS_SCRIPT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'save_winning_file',
           data: {
@@ -778,7 +809,7 @@ export default function App() {
     for (let i = 0; i < files.length; i++) {
       const compressedBase64 = await compressImage(files[i]);
       newImages.push({
-        id: `${Date.now()}_${i}`,
+        id: createClientId(i),
         label: files.length > 1 ? `${ssLabelInput} ${i + 1}` : ssLabelInput,
         url: compressedBase64
       });
@@ -808,7 +839,7 @@ export default function App() {
     for (let i = 0; i < files.length; i++) {
       const compressedBase64 = await compressImage(files[i]);
       addedSS.push({
-        id: `${Date.now()}_${i}`,
+        id: createClientId(i),
         label: `SS Tambahan ${existingSS.length + i + 1}`,
         url: compressedBase64
       });
@@ -819,9 +850,9 @@ export default function App() {
     e.target.value = '';
 
     try {
-      await fetch(API_URL, {
+      await fetch(APPS_SCRIPT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'update_violation', data: updatedItem })
       });
     } catch (err) {
@@ -860,9 +891,9 @@ export default function App() {
     setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
 
     try {
-      await fetch(API_URL, {
+      await fetch(APPS_SCRIPT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'update_violation', data: updatedItem })
       });
     } catch (err) {
@@ -899,12 +930,12 @@ export default function App() {
       setNewViolation(EMPTY_VIOLATION_FORM);
 
       try {
-        await fetch(API_URL, {
+        await fetch(APPS_SCRIPT_ENDPOINT, {
           method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'update_violation', data: updatedEntry })
         });
-      } catch (err) {
+      } catch {
         alert("Perubahan tampil di layar, namun gagal tersimpan ke Google Sheets.");
       }
       return;
@@ -912,7 +943,7 @@ export default function App() {
 
     const today = new Date().toLocaleDateString('id-ID');
     const newEntry = {
-      id: Date.now(),
+      id: createClientId(),
       tanggal: today,
       akun: newViolation.akun,
       produk: newViolation.produk,
@@ -927,12 +958,12 @@ export default function App() {
     setNewViolation(EMPTY_VIOLATION_FORM);
 
     try {
-      await fetch(API_URL, {
+      await fetch(APPS_SCRIPT_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'save_violation', data: newEntry })
       });
-    } catch (err) {
+    } catch {
       alert("Gagal menyimpan ke Google Sheets, periksa koneksi internet Anda.");
     }
   };
@@ -972,7 +1003,8 @@ export default function App() {
     `;
 
     try {
-      if (!GEMINI_API_KEY || GEMINI_API_KEY === "ISI_DENGAN_API_KEY_GEMINI_ANDA") {
+      const { response, result } = await requestGemini(fullPrompt, { temperature: 0.7, maxOutputTokens: 800 });
+      if (response.status === 503) {
         setTimeout(() => {
           setAiResponse(
             `**RINGKASAN EKSEKUTIF & POWER BULANAN PROMOOPS STUDIO**\n\n` +
@@ -987,18 +1019,8 @@ export default function App() {
         return;
       }
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: fullPrompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 800 }
-        })
-      });
-
-      const result = await response.json();
-      if (result.candidates && result.candidates.length > 0) {
-        setAiResponse(result.candidates[0].content.parts[0].text);
+      if (result?.text) {
+        setAiResponse(result.text);
       } else {
         setAiResponse(
           `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
@@ -1007,7 +1029,7 @@ export default function App() {
           `* **Total Upload (Sheet Publish):** ${totalUploadRekap} video tayang.`
         );
       }
-    } catch (err) {
+    } catch {
       setAiResponse("Gagal menghubungi server AI, namun Anda tetap dapat mencetak halaman ini ke PDF.");
     }
     setIsAiThinking(false);
@@ -1029,22 +1051,13 @@ export default function App() {
     `;
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 600 }
-        })
-      });
-
-      const result = await response.json();
-      if (result.candidates && result.candidates.length > 0) {
-        setAnalysisResult(result.candidates[0].content.parts[0].text);
+      const { result } = await requestGemini(prompt, { temperature: 0.7, maxOutputTokens: 600 });
+      if (result?.text) {
+        setAnalysisResult(result.text);
       } else {
         setAnalysisResult("Gagal mendapatkan analisa dari bot AI.");
       }
-    } catch (err) {
+    } catch {
       setAnalysisResult("Terjadi kesalahan koneksi saat menghubungi server AI.");
     }
     setIsAnalyzing(false);
@@ -1087,7 +1100,7 @@ export default function App() {
   const runBotScraper = async () => {
     setIsBotRunning(true);
     try {
-      const response = await fetch(`${API_URL}?action=run_update`);
+      const response = await fetch(`${APPS_SCRIPT_ENDPOINT}?action=run_update`);
       const result = await response.json();
       if (result.status === "success") {
         setBotReport(result.report); 
@@ -1095,7 +1108,7 @@ export default function App() {
       } else {
         alert("Gagal menjalankan bot: " + result.message);
       }
-    } catch (err) {
+    } catch {
       alert("Koneksi terputus. Pastikan Apps Script berjalan dengan baik.");
     }
     setIsBotRunning(false);
