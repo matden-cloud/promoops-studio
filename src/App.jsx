@@ -1,57 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   LayoutDashboard, BarChart2,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2
+  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check
 } from 'lucide-react';
-
-// --- DATA SIMULASI UNTUK REKAP PIPELINE ---
-const INITIAL_PRODUCT_STATS = [
-  { id: 1, produk: 'Nozzle Lem Silikon', bulan: '2026-11', tanggal: '2026-11-12', tim: 'Deni Rohmat', mentahan: 16, belumDipakai: 6, dipakai: 10, videoFinal: 12, upload: 10, isWinning: true },
-  { id: 2, produk: 'Perata Keramik', bulan: '2026-11', tanggal: '2026-11-12', tim: 'Rahmat Pajari', mentahan: 14, belumDipakai: 4, dipakai: 10, videoFinal: 15, upload: 12, isWinning: true },
-  { id: 3, produk: 'Alat Lepas Busi Rusak Mobil', bulan: '2026-11', tanggal: '2026-11-11', tim: 'Deni Rohmat', mentahan: 11, belumDipakai: 3, dipakai: 8, videoFinal: 10, upload: 11, isWinning: false },
-  { id: 4, produk: 'Saringan Talang Air Stainless', bulan: '2026-11', tanggal: '2026-11-11', tim: 'Ikhsan Harun', mentahan: 10, belumDipakai: 2, dipakai: 8, videoFinal: 8, upload: 8, isWinning: false },
-  { id: 5, produk: 'Kunci Pemutar Dongkrak Mobil', bulan: '2026-11', tanggal: '2026-11-10', tim: 'Deni Rohmat', mentahan: 12, belumDipakai: 5, dipakai: 7, videoFinal: 9, upload: 9, isWinning: true },
-  { id: 6, produk: 'Spons Amplas Pembersih Kaca', bulan: '2026-11', tanggal: '2026-11-10', tim: 'Mochamad Rizal', mentahan: 12, belumDipakai: 4, dipakai: 8, videoFinal: 11, upload: 10, isWinning: false },
-  { id: 7, produk: 'Mangkok Baut Magnetik', bulan: '2026-10', tanggal: '2026-10-28', tim: 'Rahmat Pajari', mentahan: 25, belumDipakai: 5, dipakai: 20, videoFinal: 22, upload: 20, isWinning: true },
-  { id: 8, produk: 'Mata Bor Hole Diamond 3 Tahap', bulan: '2026-10', tanggal: '2026-10-25', tim: 'Mochamad Rizal', mentahan: 18, belumDipakai: 2, dipakai: 16, videoFinal: 21, upload: 21, isWinning: true },
-];
-
-const INITIAL_DAILY_STATS = [
-  { tanggal: '2026-11-12', labelTanggal: '12/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 18, diedit: 12, upload: 5, target: 15 },
-  { tanggal: '2026-11-11', labelTanggal: '11/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 24, diedit: 16, upload: 15, target: 15 },
-  { tanggal: '2026-11-10', labelTanggal: '10/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 28, diedit: 18, upload: 18, target: 15 },
-  { tanggal: '2026-11-09', labelTanggal: '09/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 20, diedit: 15, upload: 17, target: 15 },
-  { tanggal: '2026-11-08', labelTanggal: '08/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 22, diedit: 14, upload: 14, target: 15 },
-  { tanggal: '2026-11-07', labelTanggal: '07/11/2026', bulan: '2026-11', tim: 'Semua', mentahan: 30, diedit: 19, upload: 18, target: 15 },
-];
-
-const INITIAL_VIOLATIONS = [
-  { 
-    id: 1, 
-    tanggal: '11/11/2026', 
-    akun: 'Akun 1 - Deni Rohmat', 
-    produk: 'Pisau Mesin Kawat', 
-    jenis: 'Produk Berbahaya / Tajam', 
-    status: 'Banding Diterima', 
-    linkVideo: 'https://www.tiktok.com/@tiktok/video/7123456789',
-    screenshots: [],
-    catatan: 'Hindari memperlihatkan mata pisau berputar terlalu dekat ke kamera.' 
-  },
-  { 
-    id: 2, 
-    tanggal: '08/11/2026', 
-    akun: 'Akun 3 - Mochamad Rizal', 
-    produk: 'Quick Drying Sealant', 
-    jenis: 'Klaim Berlebihan / Misleading', 
-    status: 'Menunggu Banding', 
-    linkVideo: 'https://www.tiktok.com/@tiktok/video/7987654321',
-    screenshots: [],
-    catatan: 'Ganti teks klaim instan 1 detik di hook awal.' 
-  }
-];
 
 const DEFAULT_VIOLATION_TYPES = [
   "Produk Berbahaya / Tajam",
@@ -70,14 +24,48 @@ const EMPTY_VIOLATION_FORM = {
   status: 'Belum Banding',
   catatan: '', 
   linkVideo: '', 
-  screenshots: [] // Array berisi { id, label, url }
+  screenshots: []
+};
+
+const normalizeDateToIso = (dateVal) => {
+  if (!dateVal) return '';
+  const s = String(dateVal).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (slashMatch) {
+    let p1 = parseInt(slashMatch[1], 10);
+    let p2 = parseInt(slashMatch[2], 10);
+    const yr = slashMatch[3];
+    const day = p1 > 12 ? p1 : (p2 > 12 ? p2 : p1);
+    const month = p1 > 12 ? p2 : (p2 > 12 ? p1 : p2);
+    return `${yr}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    const yr = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    return `${yr}-${mo}-${da}`;
+  }
+  return '';
+};
+
+const formatIsoMonthLabel = (ym) => {
+  if (!ym || ym === 'Semua') return '📅 Semua Bulan';
+  if (ym === 'Tanpa Tanggal') return 'Tanpa Tanggal';
+  const [yr, mo] = ym.split('-');
+  const d = new Date(parseInt(yr, 10), parseInt(mo, 10) - 1, 1);
+  if (isNaN(d.getTime())) return ym;
+  return `📅 ${d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })} (${ym})`;
 };
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
-  // --- STATE HALAMAN ANALITIK FYP ---
+  // --- STATE DATA ASLI DARI GOOGLE SHEETS ---
   const [data, setData] = useState([]);
+  const [rawAssets, setRawAssets] = useState([]);
+  const [klipVideos, setKlipVideos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isBotRunning, setIsBotRunning] = useState(false);
@@ -88,17 +76,20 @@ export default function App() {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [selectedVideo, setSelectedVideo] = useState(null);
 
-  // --- STATE HALAMAN REKAP PIPELINE ---
-  const [productStats, setProductStats] = useState(INITIAL_PRODUCT_STATS);
-  const [dailyStats] = useState(INITIAL_DAILY_STATS);
-  const [rekapBulan, setRekapBulan] = useState('2026-11');
+  // --- STATE FILTER HALAMAN REKAP PIPELINE ---
+  const [rekapBulan, setRekapBulan] = useState('Semua');
   const [rekapTanggal, setRekapTanggal] = useState('');
   const [rekapProduk, setRekapProduk] = useState('Semua');
   const [rekapTim, setRekapTim] = useState('Semua');
   const [sortBy, setSortBy] = useState('mentahan');
   const [onlyWinning, setOnlyWinning] = useState(false);
 
-  // --- STATE DRILL-DOWN MODAL DAFTAR FILE ---
+  // --- STATE PENYIMPANAN TAB KHUSUS "Data_Winning_Web" ---
+  // Key: `${bulan}__${produk}` atau `Semua__${produk}` -> { isWinning, catatan }
+  const [winningWebMap, setWinningWebMap] = useState({});
+  const [savingProductKey, setSavingProductKey] = useState(null);
+
+  // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
 
   // --- STATE ASISTEN AI PEMBACA WEB & PEMBUAT LAPORAN PPT/PDF ---
@@ -107,14 +98,14 @@ export default function App() {
   const [aiResponse, setAiResponse] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
 
-  // --- STATE HALAMAN PELANGGARAN (MULTI-SS & CUSTOM JENIS PELANGGARAN) ---
-  const [violations, setViolations] = useState(INITIAL_VIOLATIONS);
+  // --- STATE HALAMAN PELANGGARAN ---
+  const [violations, setViolations] = useState([]);
   const [newViolation, setNewViolation] = useState(EMPTY_VIOLATION_FORM);
   const [editingViolationId, setEditingViolationId] = useState(null);
   const [violationTypes, setViolationTypes] = useState(DEFAULT_VIOLATION_TYPES);
   const [isCustomJenis, setIsCustomJenis] = useState(false);
   const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
-  const [previewGallery, setPreviewGallery] = useState(null); // { produk, images: [], activeIndex: 0 }
+  const [previewGallery, setPreviewGallery] = useState(null);
 
   // ⚠️ API KEY & URL
   const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
@@ -127,7 +118,327 @@ export default function App() {
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
-  // --- FUNGSI WARNA BADGE STATUS BANDING ---
+  // --- FUNGSI TARIK SELURUH DATA DARI GOOGLE SHEETS ---
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(API_URL);
+      const result = await response.json();
+      if (result.status === "success") {
+        const validData = (result.data || []).filter(item => 
+          item.Link_Postingan && String(item.Link_Postingan).includes("tiktok.com") && item.Induk_Barang && String(item.Induk_Barang).trim() !== ""
+        ).map(item => {
+          const iso = item._isoDate || normalizeDateToIso(item.Tanggal_Upload);
+          return {
+            ...item,
+            _isoDate: iso,
+            _month: iso ? iso.slice(0, 7) : 'Tanpa Tanggal'
+          };
+        });
+        setData(validData.reverse());
+
+        if (Array.isArray(result.rawAssets)) {
+          setRawAssets(result.rawAssets);
+        }
+
+        if (Array.isArray(result.klipVideos)) {
+          setKlipVideos(result.klipVideos);
+        }
+
+        if (result.violations && result.violations.length > 0) {
+          setViolations(result.violations);
+          const customTypesFromSheet = result.violations.map(v => v.jenis).filter(Boolean);
+          setViolationTypes(prev => [...new Set([...prev, ...customTypesFromSheet])]);
+        }
+
+        // Muat data dari sheet Data_Winning_Web
+        if (Array.isArray(result.winningWeb)) {
+          const mapW = {};
+          result.winningWeb.forEach(w => {
+            if (w.key) {
+              mapW[w.key] = {
+                isWinning: !!w.isWinning,
+                catatan: w.catatan || ''
+              };
+            }
+            // Juga simpan fallback per nama produk agar lintas bulan tetap terbaca jika dibutuhkan
+            if (w.produk && !mapW[`GLOBAL__${w.produk}`]) {
+              mapW[`GLOBAL__${w.produk}`] = {
+                isWinning: !!w.isWinning,
+                catatan: w.catatan || ''
+              };
+            }
+          });
+          setWinningWebMap(mapW);
+        }
+      }
+    } catch (err) {
+      setError("Terjadi kesalahan jaringan.");
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
+
+  // Helper mendapatkan key penyimpanan Data_Winning_Web
+  const getWinningKey = (produkName) => `${rekapBulan}__${produkName}`;
+
+  const getProductWinningInfo = (produkName) => {
+    const specificKey = `${rekapBulan}__${produkName}`;
+    if (winningWebMap[specificKey]) return winningWebMap[specificKey];
+    if (winningWebMap[`Semua__${produkName}`]) return winningWebMap[`Semua__${produkName}`];
+    if (winningWebMap[`GLOBAL__${produkName}`]) return winningWebMap[`GLOBAL__${produkName}`];
+    return { isWinning: false, catatan: '' };
+  };
+
+  // --- FUNGSI SIMPAN BINTANG & CATATAN KE TAB "Data_Winning_Web" DI SHEETS ---
+  const saveProductWinningToSheet = async (item, newIsWinning, newCatatan) => {
+    const key = getWinningKey(item.produk);
+    setSavingProductKey(item.produk);
+
+    setWinningWebMap(prev => ({
+      ...prev,
+      [key]: { isWinning: newIsWinning, catatan: newCatatan },
+      [`GLOBAL__${item.produk}`]: { isWinning: newIsWinning, catatan: newCatatan }
+    }));
+
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'save_winning_web',
+          data: {
+            key: key,
+            bulan: rekapBulan,
+            produk: item.produk,
+            mentahan: item.mentahan,
+            videoFinal: item.videoFinal,
+            upload: item.upload,
+            isWinning: newIsWinning,
+            catatan: newCatatan
+          }
+        })
+      });
+    } catch (err) {
+      console.error("Gagal menyimpan ke Data_Winning_Web", err);
+    }
+    setTimeout(() => setSavingProductKey(null), 700);
+  };
+
+  // --- DAFTAR PILIHAN FILTER DINAMIS DARI SHEET ASLI ---
+  const availableMonthsRekap = useMemo(() => {
+    const months = new Set();
+    rawAssets.forEach(r => { if (r.month && r.month !== 'Tanpa Tanggal') months.add(r.month); });
+    klipVideos.forEach(k => { if (k.month && k.month !== 'Tanpa Tanggal') months.add(k.month); });
+    data.forEach(u => { if (u._month && u._month !== 'Tanpa Tanggal') months.add(u._month); });
+    return ['Semua', ...Array.from(months).sort().reverse()];
+  }, [rawAssets, klipVideos, data]);
+
+  const availableProductsRekap = useMemo(() => {
+    const prods = new Set();
+    rawAssets.forEach(r => { if (r.produk) prods.add(r.produk); });
+    klipVideos.forEach(k => { if (k.produk) prods.add(k.produk); });
+    data.forEach(u => { if (u.Induk_Barang) prods.add(String(u.Induk_Barang).trim()); });
+    return ['Semua', ...Array.from(prods).sort()];
+  }, [rawAssets, klipVideos, data]);
+
+  const availableTeamsRekap = useMemo(() => {
+    const teams = new Set();
+    rawAssets.forEach(r => { if (r.creator) teams.add(r.creator); });
+    klipVideos.forEach(k => { if (k.editor) teams.add(k.editor); });
+    data.forEach(u => { 
+      const ak = u.Nama_Akun || u.Id_Akun;
+      if (ak) teams.add(String(ak).trim());
+    });
+    return ['Semua', ...Array.from(teams).sort()];
+  }, [rawAssets, klipVideos, data]);
+
+  // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD SESUAI FILTER AKTIF ---
+  const filteredRawList = useMemo(() => {
+    return rawAssets.filter(r => {
+      const mBulan = rekapBulan === 'Semua' || r.month === rekapBulan;
+      const mTanggal = !rekapTanggal || r.date === rekapTanggal;
+      const mProduk = rekapProduk === 'Semua' || r.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || (r.creator || '').toLowerCase() === rekapTim.toLowerCase();
+      return mBulan && mTanggal && mProduk && mTim;
+    });
+  }, [rawAssets, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
+
+  const filteredKlipList = useMemo(() => {
+    return klipVideos.filter(k => {
+      const mBulan = rekapBulan === 'Semua' || k.month === rekapBulan;
+      const mTanggal = !rekapTanggal || k.date === rekapTanggal;
+      const mProduk = rekapProduk === 'Semua' || k.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || (k.editor || '').toLowerCase() === rekapTim.toLowerCase() || (k.akunTarget || '').toLowerCase() === rekapTim.toLowerCase();
+      return mBulan && mTanggal && mProduk && mTim;
+    });
+  }, [klipVideos, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
+
+  const filteredUploadList = useMemo(() => {
+    return data.filter(u => {
+      const mBulan = rekapBulan === 'Semua' || u._month === rekapBulan;
+      const mTanggal = !rekapTanggal || u._isoDate === rekapTanggal;
+      const mProduk = rekapProduk === 'Semua' || String(u.Induk_Barang).trim() === rekapProduk;
+      const ak = String(u.Nama_Akun || u.Id_Akun || '').trim();
+      const mTim = rekapTim === 'Semua' || ak.toLowerCase() === rekapTim.toLowerCase();
+      return mBulan && mTanggal && mProduk && mTim;
+    });
+  }, [data, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
+
+  // --- AGREGASI TABEL KIRI: REKAP PER PRODUK ---
+  const aggregatedProducts = useMemo(() => {
+    const map = {};
+    const ensureProd = (prodName) => {
+      const key = prodName || 'Tanpa Produk';
+      if (!map[key]) {
+        const winInfo = getProductWinningInfo(key);
+        map[key] = {
+          produk: key,
+          mentahan: 0,
+          belumDipakai: 0,
+          dipakai: 0,
+          videoFinal: 0,
+          upload: 0,
+          creators: new Set(),
+          rawFiles: [],
+          klipFiles: [],
+          uploadFiles: [],
+          isWinning: winInfo.isWinning,
+          catatan: winInfo.catatan
+        };
+      }
+      return map[key];
+    };
+
+    filteredRawList.forEach((r, idx) => {
+      const entry = ensureProd(r.produk);
+      entry.mentahan += 1;
+      if (r.status === 'Belum Dipakai') entry.belumDipakai += 1;
+      else entry.dipakai += 1;
+      if (r.creator) entry.creators.add(r.creator);
+      entry.rawFiles.push({
+        id: r.id || idx + 1,
+        name: r.fileName || r.id,
+        status: r.status || 'Mentahan',
+        owner: `${r.creator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
+        url: r.url || 'https://onedrive.live.com/'
+      });
+    });
+
+    filteredKlipList.forEach((k, idx) => {
+      const entry = ensureProd(k.produk);
+      entry.videoFinal += 1;
+      if (k.editor) entry.creators.add(k.editor);
+      entry.klipFiles.push({
+        id: k.id || idx + 1,
+        name: k.fileName || k.id,
+        status: `Selesai Edit (${k.date || '-'})`,
+        owner: `Editor: ${k.editor || '-'}`,
+        url: k.url || 'https://onedrive.live.com/'
+      });
+    });
+
+    filteredUploadList.forEach((u, idx) => {
+      const prodName = String(u.Induk_Barang || 'Tanpa Produk').trim();
+      const entry = ensureProd(prodName);
+      entry.upload += 1;
+      const ak = u.Nama_Akun || u.Id_Akun || 'Publisher';
+      entry.creators.add(ak);
+      entry.uploadFiles.push({
+        id: idx + 1,
+        name: `${prodName} — View: ${(parseInt(String(u.View).replace(/[^0-9]/g, '')) || 0).toLocaleString('id-ID')}`,
+        status: u.Video_FYP || 'Tayang di TikTok',
+        owner: `${ak} • ${u._isoDate || u.Tanggal_Upload || ''}`,
+        url: u.Link_Postingan
+      });
+    });
+
+    return Object.values(map)
+      .filter(item => !onlyWinning || item.isWinning)
+      .sort((a, b) => b[sortBy] - a[sortBy]);
+  }, [filteredRawList, filteredKlipList, filteredUploadList, winningWebMap, rekapBulan, onlyWinning, sortBy]);
+
+  // --- AGREGASI TABEL KANAN: TRACKING HARIAN ---
+  const aggregatedDaily = useMemo(() => {
+    const map = {};
+    const ensureDate = (isoDate) => {
+      if (!isoDate) return null;
+      if (!map[isoDate]) {
+        const [yr, mo, da] = isoDate.split('-');
+        map[isoDate] = {
+          tanggal: isoDate,
+          labelTanggal: da && mo && yr ? `${da}/${mo}/${yr}` : isoDate,
+          mentahan: 0,
+          diedit: 0,
+          upload: 0,
+          target: 15,
+          rawFiles: [],
+          klipFiles: [],
+          uploadFiles: []
+        };
+      }
+      return map[isoDate];
+    };
+
+    filteredRawList.forEach((r, idx) => {
+      const d = ensureDate(r.date);
+      if (!d) return;
+      d.mentahan += 1;
+      d.rawFiles.push({
+        id: r.id || idx + 1,
+        name: `${r.fileName} (${r.produk})`,
+        status: r.status || 'Mentahan',
+        owner: r.creator || 'Riset',
+        url: r.url || 'https://onedrive.live.com/'
+      });
+    });
+
+    filteredKlipList.forEach((k, idx) => {
+      const d = ensureDate(k.date);
+      if (!d) return;
+      d.diedit += 1;
+      d.klipFiles.push({
+        id: k.id || idx + 1,
+        name: `${k.fileName} (${k.produk})`,
+        status: 'Selesai Edit',
+        owner: `Editor: ${k.editor || '-'}`,
+        url: k.url || 'https://onedrive.live.com/'
+      });
+    });
+
+    filteredUploadList.forEach((u, idx) => {
+      const d = ensureDate(u._isoDate);
+      if (!d) return;
+      d.upload += 1;
+      d.uploadFiles.push({
+        id: idx + 1,
+        name: `${u.Induk_Barang} — View: ${(parseInt(String(u.View).replace(/[^0-9]/g, '')) || 0).toLocaleString('id-ID')}`,
+        status: u.Video_FYP || 'Tayang di TikTok',
+        owner: u.Nama_Akun || u.Id_Akun || 'Publisher',
+        url: u.Link_Postingan
+      });
+    });
+
+    return Object.values(map).sort((a, b) => b.tanggal.localeCompare(a.tanggal));
+  }, [filteredRawList, filteredKlipList, filteredUploadList]);
+
+  const totalMentahanRekap = filteredRawList.length;
+  const totalBelumDipakaiRekap = filteredRawList.filter(r => r.status === 'Belum Dipakai').length;
+  const totalDipakaiRekap = totalMentahanRekap - totalBelumDipakaiRekap;
+  const totalFinalRekap = filteredKlipList.length;
+  const totalUploadRekap = filteredUploadList.length;
+
+  const openRealFilesModal = (title, kategori, filesArray) => {
+    if (!filesArray || filesArray.length === 0) return;
+    setDrillDownModal({
+      title: `${kategori} — ${title}`,
+      subtitle: `Menampilkan ${filesArray.length} file asli dari Google Sheets & OneDrive`,
+      items: filesArray
+    });
+  };
+
   const getViolationStatusStyle = (status) => {
     const s = (status || '').toLowerCase();
     if (s.includes('diterima')) return 'bg-emerald-50 text-emerald-700 border-emerald-300';
@@ -136,7 +447,6 @@ export default function App() {
     return 'bg-gray-100 text-gray-700 border-gray-300';
   };
 
-  // --- FUNGSI NORMALISASI ARRAY SCREENSHOT ---
   const getViolationScreenshots = (v) => {
     if (Array.isArray(v.screenshots)) return v.screenshots;
     const list = [];
@@ -145,7 +455,6 @@ export default function App() {
     return list;
   };
 
-  // --- FUNGSI KOMPRESI GAMBAR OTOMATIS AGAR MUAT BANYAK DI GOOGLE SHEETS ---
   const compressImage = (file, maxWidth = 650, quality = 0.6) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -166,11 +475,9 @@ export default function App() {
     });
   };
 
-  // --- FUNGSI UPLOAD BANYAK SCREENSHOT SEKALIGUS KE FORM ---
   const handleMultipleScreenshots = async (e) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-
     const newImages = [];
     for (let i = 0; i < files.length; i++) {
       const compressedBase64 = await compressImage(files[i]);
@@ -180,7 +487,6 @@ export default function App() {
         url: compressedBase64
       });
     }
-
     setNewViolation(prev => ({
       ...prev,
       screenshots: [...(prev.screenshots || []), ...newImages]
@@ -188,7 +494,6 @@ export default function App() {
     e.target.value = '';
   };
 
-  // --- FUNGSI HAPUS 1 SCREENSHOT DARI FORM ---
   const handleRemoveFormScreenshot = (ssId) => {
     setNewViolation(prev => ({
       ...prev,
@@ -196,11 +501,9 @@ export default function App() {
     }));
   };
 
-  // --- FUNGSI TAMBAH BANYAK SS LANGSUNG DARI BARIS TABEL ---
   const handleQuickAddScreenshotsToRow = async (e, rowId) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-
     const targetItem = violations.find(v => v.id === rowId);
     if (!targetItem) return;
 
@@ -215,11 +518,7 @@ export default function App() {
       });
     }
 
-    const updatedItem = {
-      ...targetItem,
-      screenshots: [...existingSS, ...addedSS]
-    };
-
+    const updatedItem = { ...targetItem, screenshots: [...existingSS, ...addedSS] };
     setViolations(prev => prev.map(v => v.id === rowId ? updatedItem : v));
     e.target.value = '';
 
@@ -227,70 +526,13 @@ export default function App() {
       await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'update_violation',
-          data: updatedItem
-        })
+        body: JSON.stringify({ action: 'update_violation', data: updatedItem })
       });
     } catch (err) {
       console.error("Gagal menambah SS ke Google Sheets", err);
     }
   };
 
-  // --- FUNGSI TOGGLE BINTANG "WINNING MENTAHAN" ---
-  const toggleWinningProduct = (id) => {
-    setProductStats(prev => prev.map(item => 
-      item.id === id ? { ...item, isWinning: !item.isWinning } : item
-    ));
-  };
-
-  // --- FUNGSI MEMBUKA DAFTAR FILE SAAT ANGKA DIKLIK ---
-  const openFileDrillDown = (labelProdukAtauTanggal, kategori, jumlah, tim) => {
-    if (!jumlah || jumlah <= 0) return;
-    const cleanName = labelProdukAtauTanggal.toLowerCase().replace(/[^a-z0-9]/g, '_');
-    
-    const generatedFiles = Array.from({ length: jumlah }, (_, i) => {
-      const num = String(i + 1).padStart(3, '0');
-      if (kategori === 'Mentahan (Raw Asset)') {
-        return {
-          id: i + 1,
-          name: `raw_${cleanName}_${num}_hd.mp4`,
-          status: i < Math.floor(jumlah * 0.65) ? 'Sudah Dipakai' : 'Belum Dipakai',
-          owner: tim || 'Deni Rohmat',
-          source: 'OneDrive Folder',
-          url: `https://onedrive.live.com/?id=raw_${cleanName}_${num}`
-        };
-      } else if (kategori === 'Video Final (Production)') {
-        return {
-          id: i + 1,
-          name: `final_${cleanName}_edit_${num}.mp4`,
-          status: 'Selesai Edit',
-          owner: 'Rahmat Pajari (Editor)',
-          source: 'OneDrive Campaign',
-          url: `https://onedrive.live.com/?id=final_${cleanName}_${num}`
-        };
-      } else {
-        return {
-          id: i + 1,
-          name: `publish_${cleanName}_post_${num}.mp4`,
-          status: 'Tayang di TikTok',
-          owner: tim !== 'Semua' ? tim : `Publisher Akun ${(i % 5) + 1}`,
-          source: 'TikTok Affiliate',
-          url: `https://www.tiktok.com/`
-        };
-      }
-    });
-
-    setDrillDownModal({
-      title: `${kategori} — ${labelProdukAtauTanggal}`,
-      subtitle: `Menampilkan total ${jumlah} file yang tercatat pada sistem`,
-      category: kategori,
-      count: jumlah,
-      items: generatedFiles
-    });
-  };
-
-  // --- FUNGSI KLIK TOMBOL EDIT PADA BARIS PELANGGARAN ---
   const handleStartEditViolation = (item) => {
     setEditingViolationId(item.id);
     if (item.jenis && !violationTypes.includes(item.jenis)) {
@@ -315,11 +557,9 @@ export default function App() {
     setNewViolation(EMPTY_VIOLATION_FORM);
   };
 
-  // --- FUNGSI UBAH STATUS LANGSUNG DARI TABEL ---
   const handleQuickStatusChange = async (id, newStatus) => {
     const targetItem = violations.find(v => v.id === id);
     if (!targetItem) return;
-
     const updatedItem = { ...targetItem, status: newStatus, screenshots: getViolationScreenshots(targetItem) };
     setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
 
@@ -327,29 +567,23 @@ export default function App() {
       await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'update_violation',
-          data: updatedItem
-        })
+        body: JSON.stringify({ action: 'update_violation', data: updatedItem })
       });
     } catch (err) {
       console.error("Gagal mengupdate status ke Sheets", err);
     }
   };
 
-  // --- FUNGSI SIMPAN BARU ATAU SIMPAN PERUBAHAN EDIT PELANGGARAN ---
   const handleAddViolation = async (e) => {
     e.preventDefault();
     if (!newViolation.akun || !newViolation.produk || !newViolation.jenis) return;
 
-    // Jika user mengetik jenis pelanggaran baru, otomatis simpan ke daftar dropdown
     const cleanJenis = newViolation.jenis.trim();
     if (!violationTypes.includes(cleanJenis)) {
       setViolationTypes(prev => [...prev, cleanJenis]);
     }
     setIsCustomJenis(false);
 
-    // MODE EDIT DATA YANG SUDAH ADA
     if (editingViolationId !== null) {
       const existingItem = violations.find(v => v.id === editingViolationId);
       const updatedEntry = {
@@ -372,10 +606,7 @@ export default function App() {
         await fetch(API_URL, {
           method: 'POST',
           headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'update_violation',
-            data: updatedEntry
-          })
+          body: JSON.stringify({ action: 'update_violation', data: updatedEntry })
         });
       } catch (err) {
         alert("Perubahan tampil di layar, namun gagal tersimpan ke Google Sheets.");
@@ -383,7 +614,6 @@ export default function App() {
       return;
     }
 
-    // MODE TAMBAH DATA BARU
     const today = new Date().toLocaleDateString('id-ID');
     const newEntry = {
       id: Date.now(),
@@ -404,10 +634,7 @@ export default function App() {
       await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          action: 'save_violation',
-          data: newEntry
-        })
+        body: JSON.stringify({ action: 'save_violation', data: newEntry })
       });
     } catch (err) {
       alert("Gagal menyimpan ke Google Sheets, periksa koneksi internet Anda.");
@@ -422,15 +649,18 @@ export default function App() {
     setIsAiThinking(true);
     setAiResponse('');
 
+    const topProdsText = aggregatedProducts.slice(0, 8).map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'}, Catatan:${p.catatan || '-'})`).join('; ');
+    const recentDaysText = aggregatedDaily.slice(0, 7).map(d => `${d.labelTanggal} (Raw:${d.mentahan}, Edit:${d.diedit}, Upload:${d.upload}/${d.target})`).join('; ');
+
     const dashboardContext = `
-      Konteks Data Web PromoOps Studio Saat Ini:
+      Konteks Data Asli Web PromoOps Studio Saat Ini:
       - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim ${rekapTim}.
-      - Total Mentahan (Raw): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
-      - Total Video Final (Selesai Edit): ${totalFinalRekap} klip.
-      - Total Upload (Publisher 5 Akun): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
-      - Daftar Produk Teratas: ${filteredProducts.map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'})`).join('; ')}.
-      - Rekap Harian: ${filteredDaily.map(d => `${d.labelTanggal} (Raw:${d.mentahan}, Edit:${d.diedit}, Upload:${d.upload}/${d.target})`).join('; ')}.
-      - Total Pelanggaran Tercatat: ${violations.length} kasus (${violations.map(v => `${v.produk} [${v.status}] - ${v.jenis}`).join(', ')}).
+      - Total Mentahan (Raw_Asset): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
+      - Total Video Final (Klip_Vidio Selesai Edit): ${totalFinalRekap} klip.
+      - Total Upload (Data_View Publisher): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
+      - 8 Produk Teratas: ${topProdsText}.
+      - 7 Hari Terakhir: ${recentDaysText}.
+      - Total Pelanggaran Tercatat: ${violations.length} kasus.
     `;
 
     const fullPrompt = `
@@ -448,18 +678,18 @@ export default function App() {
         setTimeout(() => {
           setAiResponse(
             `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
-            `**1. Kekuatan Produksi & Stok Mentahan (Hulu ke Hilir)**\n` +
-            `* **Total Aset Mentahan:** Tercatat **${totalMentahanRekap} file** di OneDrive (${totalBelumDipakaiRekap} file masih siap diedit & ${totalDipakaiRekap} file telah diproduksi).\n` +
-            `* **Kinerja Editor (Video Final):** Menghasilkan **${totalFinalRekap} klip selesai**, menjaga rasio konversi produksi tetap sehat.\n` +
-            `* **Distribusi Publisher (5 Akun):** Berhasil menayangkan **${totalUploadRekap} video** dengan patokan target 15 video/hari.\n\n` +
-            `**2. Produk Prioritas & Mentahan Terbaik (Winning Asset)**\n` +
-            `* Produk dengan kontribusi tertinggi saat ini dipimpin oleh **${filteredProducts[0]?.produk || '-'}** (${filteredProducts[0]?.mentahan || 0} mentahan, ${filteredProducts[0]?.videoFinal || 0} edit, ${filteredProducts[0]?.upload || 0} upload).\n` +
-            `* Produk yang ditandai sebagai Mentahan Bagus (⭐) bulan ini: **${filteredProducts.filter(p => p.isWinning).map(p => p.produk).join(', ') || 'Belum ada'}**.\n\n` +
-            `**3. Evaluasi Harian & Mitigasi Pelanggaran**\n` +
-            `* Terdapat **${violations.length} catatan pelanggaran** yang sedang dipantau (${violations.map(v => `${v.produk}: ${v.status}`).join(', ')}).`
+            `**1. Kekuatan Produksi & Stok Mentahan (Data Real-Time Sheets)**\n` +
+            `* **Total Aset Mentahan (Raw_Asset):** Tercatat **${totalMentahanRekap} file** di OneDrive (${totalBelumDipakaiRekap} belum dipakai & ${totalDipakaiRekap} sudah dipakai).\n` +
+            `* **Kinerja Editor (Klip_Vidio):** Menghasilkan **${totalFinalRekap} klip selesai edit**.\n` +
+            `* **Distribusi Publisher:** Berhasil menayangkan **${totalUploadRekap} video**.\n\n` +
+            `**2. Peringkat Produk Terbanyak & Winning Web**\n` +
+            `* Produk tertinggi dipimpin oleh **${aggregatedProducts[0]?.produk || '-'}** (${aggregatedProducts[0]?.mentahan || 0} mentahan, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).\n` +
+            `* Produk yang ditandai Bagus (⭐ di Data_Winning_Web): **${aggregatedProducts.filter(p => p.isWinning).map(p => `${p.produk}${p.catatan ? ` (${p.catatan})` : ''}`).join(', ') || 'Belum ada'}**.\n\n` +
+            `**3. Evaluasi Pelanggaran**\n` +
+            `* Tercatat **${violations.length} kasus pelanggaran** yang sedang dikelola oleh tim.`
           );
           setIsAiThinking(false);
-        }, 800);
+        }, 600);
         return;
       }
 
@@ -480,19 +710,16 @@ export default function App() {
           `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
           `* **Total Mentahan:** ${totalMentahanRekap} file (${totalBelumDipakaiRekap} siap pakai).\n` +
           `* **Total Produksi (Video Final):** ${totalFinalRekap} video selesai diedit.\n` +
-          `* **Total Upload (5 Akun):** ${totalUploadRekap} video tayang.\n` +
-          `* **Produk Terbanyak:** ${filteredProducts[0]?.produk || '-'} (${filteredProducts[0]?.mentahan || 0} raw, ${filteredProducts[0]?.upload || 0} upload).\n` +
-          `* **Winning Asset Bulan Ini:** ${filteredProducts.filter(p => p.isWinning).map(p => p.produk).join(', ') || '-'}.\n` +
-          `* **Catatan Pelanggaran:** ${violations.length} kasus aktif yang telah dievaluasi.`
+          `* **Total Upload:** ${totalUploadRekap} video tayang.\n` +
+          `* **Produk Terbanyak:** ${aggregatedProducts[0]?.produk || '-'} (${aggregatedProducts[0]?.mentahan || 0} raw, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).`
         );
       }
     } catch (err) {
-      setAiResponse("Gagal menghubungi server AI, namun Anda tetap dapat mencetak halaman ini ke PDF menggunakan tombol Cetak Laporan.");
+      setAiResponse("Gagal menghubungi server AI, namun Anda tetap dapat mencetak halaman ini ke PDF.");
     }
     setIsAiThinking(false);
   };
 
-  // --- FUNGSI MEMANGGIL GEMINI API PER BARIS FYP ---
   const analyzeWithGemini = async (row) => {
     setSelectedVideo(row);
     setIsAnalyzing(true);
@@ -501,17 +728,11 @@ export default function App() {
     const viewCount = (parseInt(String(row.View).replace(/[^0-9]/g, '')) || 0).toLocaleString('id-ID');
     const prompt = `
       Anda adalah pakar Algoritma TikTok dan Strategi Konten E-Commerce.
-      Tugas Anda adalah memberikan analisa mendalam, padat, dan tidak bertele-tele mengenai mengapa video promosi ini berhasil.
-      
-      Data Video:
+      Berikan analisa singkat mengapa video promosi ini berhasil:
       - Nama Barang/Produk: ${row.Induk_Barang}
       - Jumlah Tayangan (Views): ${viewCount}
       - Status Keberhasilan: ${row.Video_FYP}
-      
-      Berikan analisa Anda ke dalam 3 aspek berikut:
-      1. Anatomi Hook (3 Detik Pertama)
-      2. Nilai Retensi & Emosi
-      3. Sinyal Algoritma
+      Bahas: 1. Anatomi Hook, 2. Nilai Retensi, 3. Sinyal Algoritma.
     `;
 
     try {
@@ -536,7 +757,6 @@ export default function App() {
     setIsAnalyzing(false);
   };
 
-  // Helper Functions 
   const getBulanFormat = (dateStr) => {
     if (!dateStr) return 'Tanpa Tanggal';
     try {
@@ -571,30 +791,6 @@ export default function App() {
     return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
   };
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(API_URL);
-      const result = await response.json();
-      if (result.status === "success") {
-        const validData = result.data.filter(item => 
-          item.Link_Postingan && item.Link_Postingan.includes("tiktok.com") && item.Induk_Barang && item.Induk_Barang.trim() !== ""
-        );
-        setData(validData.reverse());
-
-        if (result.violations && result.violations.length > 0) {
-          setViolations(result.violations);
-          // Kumpulkan juga jenis pelanggaran baru yang pernah disimpan di Google Sheets
-          const customTypesFromSheet = result.violations.map(v => v.jenis).filter(Boolean);
-          setViolationTypes(prev => [...new Set([...prev, ...customTypesFromSheet])]);
-        }
-      }
-    } catch (err) {
-      setError("Terjadi kesalahan jaringan.");
-    }
-    setLoading(false);
-  };
-
   const runBotScraper = async () => {
     setIsBotRunning(true);
     try {
@@ -611,9 +807,6 @@ export default function App() {
     }
     setIsBotRunning(false);
   };
-
-  useEffect(() => { fetchData(); }, []);
-  useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
 
   // --- FILTERING DATA ANALITIK FYP ---
   const listBulan = ['Semua', ...new Set(data.map(item => getBulanFormat(item.Tanggal_Upload)).filter(b => b !== 'Tanpa Tanggal' && b !== 'Format Tidak Dikenal'))];
@@ -638,35 +831,11 @@ export default function App() {
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
 
-  // --- FILTERING & SORTING DATA REKAP PIPELINE ---
-  const filteredProducts = productStats
-    .filter(item => {
-      const mBulan = rekapBulan === 'Semua' || item.bulan === rekapBulan;
-      const mTanggal = !rekapTanggal || item.tanggal === rekapTanggal;
-      const mProduk = rekapProduk === 'Semua' || item.produk === rekapProduk;
-      const mTim = rekapTim === 'Semua' || item.tim === rekapTim;
-      const mWin = !onlyWinning || item.isWinning;
-      return mBulan && mTanggal && mProduk && mTim && mWin;
-    })
-    .sort((a, b) => b[sortBy] - a[sortBy]);
-
-  const filteredDaily = dailyStats.filter(item => {
-    const mBulan = rekapBulan === 'Semua' || item.bulan === rekapBulan;
-    const mTanggal = !rekapTanggal || item.tanggal === rekapTanggal;
-    return mBulan && mTanggal;
-  });
-
-  const totalMentahanRekap = filteredProducts.reduce((acc, cur) => acc + cur.mentahan, 0);
-  const totalBelumDipakaiRekap = filteredProducts.reduce((acc, cur) => acc + cur.belumDipakai, 0);
-  const totalDipakaiRekap = filteredProducts.reduce((acc, cur) => acc + cur.dipakai, 0);
-  const totalFinalRekap = filteredProducts.reduce((acc, cur) => acc + cur.videoFinal, 0);
-  const totalUploadRekap = filteredProducts.reduce((acc, cur) => acc + cur.upload, 0);
-
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative print:bg-white print:pb-0">
       
       {/* ========================================================================= */}
-      {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE SAAT ANGKA (16, 12, 10) DIKLIK     */}
+      {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE ASLI DARI GOOGLE SHEETS            */}
       {/* ========================================================================= */}
       {drillDownModal && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
@@ -685,11 +854,11 @@ export default function App() {
             </div>
 
             <div className="p-4 md:p-6 overflow-y-auto divide-y divide-gray-100 flex-1 bg-gray-50/40">
-              {drillDownModal.items.map((file) => (
-                <div key={file.id} className="py-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-white rounded-lg transition-colors">
+              {drillDownModal.items.map((file, idx) => (
+                <div key={idx} className="py-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-white rounded-lg transition-colors">
                   <div className="flex items-start gap-3">
                     <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                      {file.id}
+                      {idx + 1}
                     </div>
                     <div>
                       <p className="font-bold text-gray-900 text-sm break-all">{file.name}</p>
@@ -697,21 +866,23 @@ export default function App() {
                         <span className="text-xs text-gray-500 font-medium">{file.owner}</span>
                         <span className="text-gray-300">•</span>
                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
-                          file.status === 'Belum Dipakai' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                          String(file.status).includes('Belum') ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         }`}>
                           {file.status}
                         </span>
                       </div>
                     </div>
                   </div>
-                  <a 
-                    href={file.url} 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
-                  >
-                    Buka File <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                  {file.url && (
+                    <a 
+                      href={file.url} 
+                      target="_blank" 
+                      rel="noreferrer" 
+                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
+                    >
+                      Buka File <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                 </div>
               ))}
             </div>
@@ -736,7 +907,7 @@ export default function App() {
                 <BrainCircuit className="w-6 h-6 text-emerald-200" />
                 <div>
                   <h3 className="font-bold text-base md:text-lg">Asisten AI Laporan & Analisa Web</h3>
-                  <p className="text-xs text-emerald-100">AI membaca angka yang tampil di web Anda untuk membuat materi PPT / evaluasi</p>
+                  <p className="text-xs text-emerald-100">AI membaca data asli Google Sheets di web Anda untuk membuat materi PPT / evaluasi</p>
                 </div>
               </div>
               <button onClick={() => setIsAiAssistantOpen(false)} className="text-emerald-100 hover:text-white bg-white/10 p-2 rounded-full">
@@ -794,7 +965,7 @@ export default function App() {
                 value={aiQuestion}
                 onChange={(e) => setAiQuestion(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && askAiAboutDashboard()}
-                placeholder="Tanya AI soal data di layar ini (misal: Ringkas laporan untuk atasan)..."
+                placeholder="Tanya AI soal data di layar ini..."
                 className="flex-1 bg-gray-50 border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:border-emerald-500"
               />
               <button 
@@ -851,7 +1022,6 @@ export default function App() {
               )}
             </div>
 
-            {/* Thumbnail Pilihan Gambar di Bawah */}
             {previewGallery.images.length > 1 && (
               <div className="flex gap-2 overflow-x-auto pt-3 mt-2">
                 {previewGallery.images.map((img, idx) => (
@@ -881,11 +1051,7 @@ export default function App() {
             </div>
             <div className="p-6">
               <p className="text-gray-600 text-sm mb-6 leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100">"{botReport.pesan}"</p>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center border-b border-gray-100 pb-3"><span className="text-gray-500 text-sm font-semibold">Video Dianalisa:</span><span className="font-bold text-gray-900">{botReport.videoTerdeteksi} baris</span></div>
-                <div className="flex justify-between items-center border-b border-gray-100 pb-3"><span className="text-gray-500 text-sm font-semibold">Penggunaan Kuota:</span><span className={`font-bold px-3 py-1 rounded-md text-sm ${botReport.apiHabis ? 'bg-red-100 text-red-700' : 'bg-blue-50 text-blue-700'}`}>{botReport.apiTerpakai} request</span></div>
-              </div>
-              <button onClick={() => setBotReport(null)} className="w-full mt-6 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 rounded-xl transition-colors shadow-md">Tutup Laporan</button>
+              <button onClick={() => setBotReport(null)} className="w-full mt-2 bg-gray-900 hover:bg-gray-800 text-white font-bold py-3 rounded-xl transition-colors shadow-md">Tutup Laporan</button>
             </div>
           </div>
         </div>
@@ -914,12 +1080,9 @@ export default function App() {
                 </div>
               ) : (
                 <div className="prose prose-sm prose-purple max-w-none">
-                  {analysisResult?.split('\n').map((line, i) => {
-                    if (line.trim() === '') return <br key={i} />;
-                    if (line.startsWith('**') && line.endsWith('**')) return <h4 key={i} className="font-bold text-gray-900 mt-4 mb-2">{line.replace(/\*\*/g, '')}</h4>;
-                    if (line.startsWith('* ')) return <li key={i} className="text-gray-700 ml-4 mb-1">{line.replace('* ', '')}</li>;
-                    return <p key={i} className="text-gray-700 leading-relaxed mb-3">{line.replace(/\*\*/g, '')}</p>;
-                  })}
+                  {analysisResult?.split('\n').map((line, i) => (
+                    <p key={i} className="text-gray-700 leading-relaxed mb-2">{line.replace(/\*\*/g, '')}</p>
+                  ))}
                 </div>
               )}
             </div>
@@ -957,16 +1120,23 @@ export default function App() {
 
         <div className="flex items-center justify-center gap-2 w-full lg:w-auto">
           <button 
+            onClick={fetchData}
+            disabled={loading}
+            className="bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 px-3 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-1.5 shadow-sm"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-600' : ''}`} /> Sinkron Sheets
+          </button>
+          <button 
             onClick={() => { setIsAiAssistantOpen(true); if (!aiResponse) askAiAboutDashboard("Buatkan ringkasan laporan eksekutif dari data web saat ini"); }}
             className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-1.5 transition-colors shadow-sm"
           >
-            <Sparkles className="w-4 h-4" /> Tanya AI (Analisa Web)
+            <Sparkles className="w-4 h-4" /> Tanya AI
           </button>
           <button 
             onClick={() => window.print()}
             className="bg-gray-900 hover:bg-gray-800 text-white px-3.5 py-2 rounded-lg text-xs md:text-sm font-bold flex items-center gap-1.5 transition-colors shadow-sm"
           >
-            <Printer className="w-4 h-4" /> Cetak PDF / Laporan
+            <Printer className="w-4 h-4" /> Cetak PDF
           </button>
         </div>
       </div>
@@ -980,7 +1150,9 @@ export default function App() {
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
-              <p className="text-gray-500 mt-1">Klik pada angka jumlah file untuk membuka rincian video. Gunakan tombol Cetak PDF atau Tanya AI untuk menyusun laporan.</p>
+              <p className="text-gray-500 mt-1">
+                Sheet AppSheet utama <span className="font-semibold text-emerald-700">100% Hanya Baca (Aman)</span>. Tanda bintang ⭐ & catatan produk disimpan terpisah ke tab <span className="font-semibold text-amber-700">Data_Winning_Web</span>.
+              </p>
             </div>
             <div className="flex flex-wrap gap-2 print:hidden">
               <button 
@@ -993,13 +1165,14 @@ export default function App() {
             </div>
           </div>
 
+          {/* 1. FILTER TERPADU DINAMIS DARI SHEET */}
           <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 print:hidden">
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Bulan</label>
               <select value={rekapBulan} onChange={(e) => setRekapBulan(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
-                <option value="2026-11">📅 November 2026</option>
-                <option value="2026-10">📅 Oktober 2026</option>
-                <option value="Semua">Semua Bulan</option>
+                {availableMonthsRekap.map(m => (
+                  <option key={m} value={m}>{formatIsoMonthLabel(m)}</option>
+                ))}
               </select>
             </div>
 
@@ -1021,69 +1194,88 @@ export default function App() {
             <div>
               <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Filter Produk</label>
               <select value={rekapProduk} onChange={(e) => setRekapProduk(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
-                <option value="Semua">📦 Semua Produk</option>
-                {[...new Set(productStats.map(p => p.produk))].map(prod => (
-                  <option key={prod} value={prod}>{prod}</option>
+                {availableProductsRekap.map(prod => (
+                  <option key={prod} value={prod}>{prod === 'Semua' ? '📦 Semua Produk' : prod}</option>
                 ))}
               </select>
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Tim / Akun</label>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Kreator / Editor / Akun</label>
               <select value={rekapTim} onChange={(e) => setRekapTim(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
-                <option value="Semua">👥 Semua Tim & Publisher</option>
-                <option value="Rahmat Pajari">Rahmat Pajari</option>
-                <option value="Deni Rohmat">Deni Rohmat</option>
-                <option value="Ikhsan Harun">Ikhsan Harun</option>
-                <option value="Mochamad Rizal">Mochamad Rizal</option>
+                {availableTeamsRekap.map(t => (
+                  <option key={t} value={t}>{t === 'Semua' ? '👥 Semua Tim & Akun' : t}</option>
+                ))}
               </select>
             </div>
           </div>
 
+          {/* 2. TIGA KARTU TOTAL SESUAI FILTER */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div 
-              onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Mentahan (Raw Asset)', totalMentahanRekap, rekapTim)}
+              onClick={() => openRealFilesModal(
+                rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk,
+                'Mentahan (Raw_Asset)',
+                aggregatedProducts.flatMap(p => p.rawFiles)
+              )}
               className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-blue-400 hover:shadow-md transition-all group"
             >
               <div>
-                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">1. Total Mentahan (Raw)</p>
-                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-blue-600 transition-colors">{totalMentahanRekap} <span className="text-sm font-semibold text-gray-400">file (Klik buka)</span></h3>
+                <p className="text-xs font-bold text-blue-600 uppercase tracking-wider">1. Total Mentahan (Raw_Asset)</p>
+                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-blue-600 transition-colors">
+                  {loading ? '...' : totalMentahanRekap} <span className="text-sm font-semibold text-gray-400">file (Klik buka)</span>
+                </h3>
                 <p className="text-xs text-gray-500 mt-1">{totalBelumDipakaiRekap} belum dipakai • {totalDipakaiRekap} dipakai</p>
               </div>
               <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">OneDrive</div>
             </div>
 
             <div 
-              onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Video Final (Production)', totalFinalRekap, 'Rahmat Pajari')}
+              onClick={() => openRealFilesModal(
+                rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk,
+                'Video Final (Klip_Vidio)',
+                aggregatedProducts.flatMap(p => p.klipFiles)
+              )}
               className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-amber-400 hover:shadow-md transition-all group"
             >
               <div>
-                <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">2. Video Final (Production)</p>
-                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-amber-600 transition-colors">{totalFinalRekap} <span className="text-sm font-semibold text-gray-400">klip selesai (Klik)</span></h3>
-                <p className="text-xs text-gray-500 mt-1">Berdasarkan tanggal selesai edit</p>
+                <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">2. Video Final (Klip_Vidio)</p>
+                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-amber-600 transition-colors">
+                  {loading ? '...' : totalFinalRekap} <span className="text-sm font-semibold text-gray-400">klip selesai (Klik)</span>
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">Berdasarkan Tanggal_Selesai di Klip_Vidio</p>
               </div>
               <div className="p-3 bg-amber-50 text-amber-600 rounded-xl font-bold text-xs">Editor</div>
             </div>
 
             <div 
-              onClick={() => openFileDrillDown(rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk, 'Video Terupload (Publisher)', totalUploadRekap, rekapTim)}
+              onClick={() => openRealFilesModal(
+                rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk,
+                'Video Terupload (Publisher)',
+                aggregatedProducts.flatMap(p => p.uploadFiles)
+              )}
               className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all group"
             >
               <div>
                 <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">3. Total Upload (Publisher)</p>
-                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-emerald-600 transition-colors">{totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang (Klik)</span></h3>
+                <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-emerald-600 transition-colors">
+                  {loading ? '...' : totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang (Klik)</span>
+                </h3>
                 <p className="text-xs text-emerald-600 font-semibold mt-1">Target: 5 Akun × 3 Video (15/hari)</p>
               </div>
               <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs">5 Akun</div>
             </div>
           </div>
 
+          {/* 3. DUA TABEL UTAMA: PERINGKAT PRODUK (DENGAN CATATAN WINNING WEB) & TRACKING HARIAN */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* TABEL KIRI: PERINGKAT PER PRODUK + SIMPAN KE Data_Winning_Web */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-gray-50">
                 <div>
-                  <h3 className="font-bold text-gray-900 text-sm">Peringkat per Produk</h3>
-                  <p className="text-xs text-gray-500">Klik angka untuk melihat & membuka daftar file videonya</p>
+                  <h3 className="font-bold text-gray-900 text-sm">Peringkat per Produk ({aggregatedProducts.length} Produk)</h3>
+                  <p className="text-xs text-gray-500">Klik ⭐ atau isi catatan untuk menyimpan ke sheet <span className="font-bold text-amber-700">Data_Winning_Web</span></p>
                 </div>
                 <div className="flex items-center gap-1 text-xs print:hidden">
                   <span className="text-gray-500 font-semibold mr-1">Urutkan:</span>
@@ -1092,40 +1284,68 @@ export default function App() {
                   <button onClick={() => setSortBy('upload')} className={`px-2 py-1 rounded font-bold ${sortBy === 'upload' ? 'bg-emerald-600 text-white' : 'bg-white border text-gray-600'}`}>Upload</button>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[600px]">
                 <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-gray-600 bg-gray-50/50 text-xs uppercase">
-                      <th className="py-3 px-4 font-bold">Nama Produk</th>
+                  <thead className="sticky top-0 bg-gray-50 z-10">
+                    <tr className="border-b border-gray-200 text-gray-600 text-xs uppercase">
+                      <th className="py-3 px-4 font-bold">Nama Produk & Catatan Winning</th>
                       <th className="py-3 px-3 font-bold text-center text-blue-700">Mentahan</th>
                       <th className="py-3 px-3 font-bold text-center text-amber-700">Video Final</th>
                       <th className="py-3 px-3 font-bold text-center text-emerald-700">Upload</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {filteredProducts.length === 0 ? (
+                    {loading && aggregatedProducts.length === 0 ? (
+                      <tr><td colSpan="4" className="py-12 text-center text-gray-400 font-semibold">Menarik & menggabungkan data dari Google Sheets...</td></tr>
+                    ) : aggregatedProducts.length === 0 ? (
                       <tr><td colSpan="4" className="py-8 text-center text-gray-400 font-semibold">Tidak ada data produk sesuai filter.</td></tr>
                     ) : (
-                      filteredProducts.map((item) => (
-                        <tr key={item.id} className="hover:bg-gray-50">
+                      aggregatedProducts.map((item) => (
+                        <tr key={item.produk} className={`hover:bg-gray-50 ${item.isWinning ? 'bg-amber-50/20' : ''}`}>
                           <td className="py-3 px-4">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-start gap-2.5">
                               <button 
-                                onClick={() => toggleWinningProduct(item.id)}
-                                title="Tandai Bagus Bulan Ini"
-                                className="focus:outline-none"
+                                onClick={() => saveProductWinningToSheet(item, !item.isWinning, item.catatan)}
+                                title="Klik untuk tandai Mentahan Bagus & simpan ke Data_Winning_Web"
+                                className="focus:outline-none mt-0.5"
                               >
                                 <Star className={`w-4 h-4 transition-colors ${item.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
                               </button>
-                              <div>
-                                <p className="font-bold text-gray-900">{item.produk}</p>
-                                <span className="text-[11px] text-gray-400 font-medium">{item.tim} • Sisa {item.belumDipakai} raw</span>
+                              <div className="w-full">
+                                <div className="flex items-center gap-2">
+                                  <p className="font-bold text-gray-900">{item.produk}</p>
+                                  {savingProductKey === item.produk && (
+                                    <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-0.5 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                      <Check className="w-3 h-3" /> Tersimpan
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-gray-400 font-medium block mb-1.5">
+                                  {Array.from(item.creators).slice(0, 3).join(', ') || 'Tim'} • Sisa {item.belumDipakai} raw
+                                </span>
+                                {/* Input Catatan Evaluasi Mentahan yang tersimpan ke Data_Winning_Web */}
+                                <input
+                                  type="text"
+                                  defaultValue={item.catatan || ''}
+                                  placeholder="Tulis catatan winning (Enter u/ simpan)..."
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (item.catatan || '')) {
+                                      saveProductWinningToSheet(item, item.isWinning, e.target.value);
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.target.blur();
+                                    }
+                                  }}
+                                  className="bg-gray-50 focus:bg-white border border-gray-200 focus:border-amber-400 text-gray-700 text-[11px] rounded px-2 py-1 w-full max-w-[230px] focus:outline-none print:border-none print:bg-transparent print:p-0"
+                                />
                               </div>
                             </div>
                           </td>
                           <td className="py-3 px-3 text-center bg-blue-50/30">
                             <button 
-                              onClick={() => openFileDrillDown(item.produk, 'Mentahan (Raw Asset)', item.mentahan, item.tim)}
+                              onClick={() => openRealFilesModal(item.produk, 'Mentahan (Raw_Asset)', item.rawFiles)}
                               className="font-black text-blue-600 hover:bg-blue-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
                             >
                               {item.mentahan}
@@ -1133,7 +1353,7 @@ export default function App() {
                           </td>
                           <td className="py-3 px-3 text-center">
                             <button 
-                              onClick={() => openFileDrillDown(item.produk, 'Video Final (Production)', item.videoFinal, 'Rahmat Pajari')}
+                              onClick={() => openRealFilesModal(item.produk, 'Video Final (Klip_Vidio)', item.klipFiles)}
                               className="font-black text-amber-600 hover:bg-amber-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
                             >
                               {item.videoFinal}
@@ -1141,7 +1361,7 @@ export default function App() {
                           </td>
                           <td className="py-3 px-3 text-center bg-emerald-50/30">
                             <button 
-                              onClick={() => openFileDrillDown(item.produk, 'Video Terupload (Publisher)', item.upload, item.tim)}
+                              onClick={() => openRealFilesModal(item.produk, 'Video Terupload (Publisher)', item.uploadFiles)}
                               className="font-black text-emerald-600 hover:bg-emerald-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
                             >
                               {item.upload}
@@ -1155,17 +1375,18 @@ export default function App() {
               </div>
             </div>
 
+            {/* TABEL KANAN: TRACKING HARIAN */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
                 <div>
-                  <h3 className="font-bold text-gray-900 text-sm">Tracking Harian (Per Tanggal)</h3>
+                  <h3 className="font-bold text-gray-900 text-sm">Tracking Harian ({aggregatedDaily.length} Tanggal Aktif)</h3>
                   <p className="text-xs text-gray-500">Klik angka harian untuk membuka daftar file pada tanggal tersebut</p>
                 </div>
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto max-h-[600px]">
                 <table className="w-full text-left border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 text-gray-600 bg-gray-50/50 text-xs uppercase">
+                  <thead className="sticky top-0 bg-gray-50 z-10">
+                    <tr className="border-b border-gray-200 text-gray-600 text-xs uppercase">
                       <th className="py-3 px-4 font-bold">Tanggal</th>
                       <th className="py-3 px-3 font-bold text-center">Mentahan</th>
                       <th className="py-3 px-3 font-bold text-center">Diedit</th>
@@ -1174,53 +1395,59 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {filteredDaily.map((day, idx) => {
-                      const isTargetMet = day.upload >= day.target;
-                      return (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="py-3 px-4 font-bold text-gray-900">{day.labelTanggal}</td>
-                          <td className="py-3 px-3 text-center">
-                            <button 
-                              onClick={() => openFileDrillDown(`Tanggal ${day.labelTanggal}`, 'Mentahan (Raw Asset)', day.mentahan, 'Tim Riset')}
-                              className="font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded underline decoration-dotted"
-                            >
-                              {day.mentahan}
-                            </button>
-                          </td>
-                          <td className="py-3 px-3 text-center">
-                            <button 
-                              onClick={() => openFileDrillDown(`Tanggal ${day.labelTanggal}`, 'Video Final (Production)', day.diedit, 'Rahmat Pajari')}
-                              className="font-semibold text-amber-600 hover:bg-amber-50 px-2 py-0.5 rounded underline decoration-dotted"
-                            >
-                              {day.diedit}
-                            </button>
-                          </td>
-                          <td className="py-3 px-3 text-center">
-                            <button 
-                              onClick={() => openFileDrillDown(`Tanggal ${day.labelTanggal}`, 'Video Terupload (Publisher)', day.upload, '5 Akun Publisher')}
-                              className={`font-black px-2 py-0.5 rounded underline decoration-dotted ${isTargetMet ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'}`}
-                            >
-                              {day.upload}
-                            </button>
-                          </td>
-                          <td className="py-3 px-4 text-right">
-                            {day.upload > day.target ? (
-                              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
-                                Melampaui ({day.upload}/{day.target})
-                              </span>
-                            ) : isTargetMet ? (
-                              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
-                                Tercapai ({day.upload}/{day.target})
-                              </span>
-                            ) : (
-                              <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-xs font-bold">
-                                Kurang {day.target - day.upload} ({day.upload}/{day.target})
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {loading && aggregatedDaily.length === 0 ? (
+                      <tr><td colSpan="5" className="py-12 text-center text-gray-400 font-semibold">Menghitung riwayat harian dari Google Sheets...</td></tr>
+                    ) : aggregatedDaily.length === 0 ? (
+                      <tr><td colSpan="5" className="py-8 text-center text-gray-400 font-semibold">Tidak ada aktivitas pada filter tanggal/bulan ini.</td></tr>
+                    ) : (
+                      aggregatedDaily.map((day) => {
+                        const isTargetMet = day.upload >= day.target;
+                        return (
+                          <tr key={day.tanggal} className="hover:bg-gray-50">
+                            <td className="py-3 px-4 font-bold text-gray-900">{day.labelTanggal}</td>
+                            <td className="py-3 px-3 text-center">
+                              <button 
+                                onClick={() => openRealFilesModal(`Tanggal ${day.labelTanggal}`, 'Mentahan (Raw_Asset)', day.rawFiles)}
+                                className="font-semibold text-blue-600 hover:bg-blue-50 px-2 py-0.5 rounded underline decoration-dotted"
+                              >
+                                {day.mentahan}
+                              </button>
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              <button 
+                                onClick={() => openRealFilesModal(`Tanggal ${day.labelTanggal}`, 'Video Final (Klip_Vidio)', day.klipFiles)}
+                                className="font-semibold text-amber-600 hover:bg-amber-50 px-2 py-0.5 rounded underline decoration-dotted"
+                              >
+                                {day.diedit}
+                              </button>
+                            </td>
+                            <td className="py-3 px-3 text-center">
+                              <button 
+                                onClick={() => openRealFilesModal(`Tanggal ${day.labelTanggal}`, 'Video Terupload (Publisher)', day.uploadFiles)}
+                                className={`font-black px-2 py-0.5 rounded underline decoration-dotted ${isTargetMet ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'}`}
+                              >
+                                {day.upload}
+                              </button>
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              {day.upload > day.target ? (
+                                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
+                                  Melampaui ({day.upload}/{day.target})
+                                </span>
+                              ) : isTargetMet ? (
+                                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-xs font-bold">
+                                  Tercapai ({day.upload}/{day.target})
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-md text-xs font-bold">
+                                  Kurang {day.target - day.upload} ({day.upload}/{day.target})
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1303,15 +1530,6 @@ export default function App() {
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden mb-6 relative">
-            
-            {isBotRunning && (
-              <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center text-center p-4">
-                <RefreshCw className="w-10 h-10 text-emerald-600 animate-spin mb-3" />
-                <h3 className="font-bold text-gray-900 text-lg">Bot Sedang Bekerja...</h3>
-                <p className="text-sm text-gray-500 font-medium mt-1">Mengecek RapidAPI dan mengupdate Google Sheets. Jangan tutup halaman ini.</p>
-              </div>
-            )}
-
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
                 <thead>
@@ -1401,7 +1619,7 @@ export default function App() {
       )}
 
       {/* ========================================================================= */}
-      {/* HALAMAN 3: EVALUASI PELANGGARAN (MULTI-SS TANPA BATAS & TAMBAH JENIS)     */}
+      {/* HALAMAN 3: EVALUASI PELANGGARAN                                           */}
       {/* ========================================================================= */}
       {activeMenu === 'pelanggaran' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
@@ -1412,7 +1630,6 @@ export default function App() {
             <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, tambah jenis pelanggaran baru kapan saja, dan upload banyak bukti screenshot sekaligus.</p>
           </div>
 
-          {/* FORM TAMBAH / EDIT PELANGGARAN */}
           <form onSubmit={handleAddViolation} className={`bg-white p-5 rounded-2xl shadow-sm border mb-6 print:hidden transition-colors ${editingViolationId !== null ? 'border-amber-400 ring-2 ring-amber-100' : 'border-red-200'}`}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
@@ -1453,7 +1670,6 @@ export default function App() {
                 required
               />
 
-              {/* DROPDOWN JENIS PELANGGARAN + FITUR KETIK JENIS BARU */}
               {!isCustomJenis ? (
                 <select 
                   value={newViolation.jenis}
@@ -1497,7 +1713,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* PILIHAN STATUS BANDING */}
               <select 
                 value={newViolation.status}
                 onChange={(e) => setNewViolation({...newViolation, status: e.target.value})}
@@ -1517,7 +1732,6 @@ export default function App() {
                 className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
               />
 
-              {/* MULTI-UPLOAD SCREENSHOT DENGAN PILIHAN LABEL */}
               <div className="flex gap-1.5 sm:col-span-2">
                 <select
                   value={ssLabelInput}
@@ -1548,7 +1762,6 @@ export default function App() {
               />
             </div>
 
-            {/* DAFTAR PREVIEW SCREENSHOT YANG SUDAH DIPILIH DI FORM */}
             {newViolation.screenshots && newViolation.screenshots.length > 0 && (
               <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-200">
                 <p className="text-xs font-bold text-gray-600 mb-2">
@@ -1563,7 +1776,6 @@ export default function App() {
                         type="button"
                         onClick={() => handleRemoveFormScreenshot(ss.id)}
                         className="text-gray-400 hover:text-red-600 p-0.5"
-                        title="Hapus SS ini"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -1589,7 +1801,6 @@ export default function App() {
             </div>
           </form>
 
-          {/* TABEL DAFTAR PELANGGARAN */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm min-w-[950px]">
@@ -1629,7 +1840,6 @@ export default function App() {
                           </span>
                         </td>
 
-                        {/* KOLOM MULTI-SCREENSHOT GALERI */}
                         <td className="py-3.5 px-4 text-center">
                           <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-[220px] mx-auto">
                             {rowScreenshots.map((ss, idx) => (
@@ -1650,7 +1860,6 @@ export default function App() {
                           </div>
                         </td>
 
-                        {/* KOLOM DROPDOWN STATUS BANDING */}
                         <td className="py-3.5 px-4">
                           <select
                             value={v.status || 'Belum Banding'}
@@ -1666,7 +1875,6 @@ export default function App() {
 
                         <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
 
-                        {/* KOLOM TOMBOL EDIT BARIS */}
                         <td className="py-3.5 px-4 text-center print:hidden">
                           <button
                             onClick={() => handleStartEditViolation(v)}
