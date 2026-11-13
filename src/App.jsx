@@ -74,6 +74,32 @@ const formatShortMonthTitle = (ym) => {
   return d.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' });
 };
 
+const getFypFileKey = (row) => {
+  const identity = String(row?.Id_Klip || row?.Link_Postingan || '').trim();
+  return identity ? `FYP__${identity}` : '';
+};
+
+const getFypFileObj = (row) => ({
+  fileKey: getFypFileKey(row),
+  kategori: 'Laporan FYP',
+  produk: row?.Induk_Barang || '',
+  name: row?.Nama_File || row?.Induk_Barang || '',
+  url: row?.Link_Postingan || ''
+});
+
+const getFypRowKey = (row) => {
+  const fileKey = getFypFileKey(row);
+  if (fileKey) return fileKey;
+  return [
+    'fyp-unkeyed',
+    row?.Induk_Barang || '',
+    row?.Nama_Akun || row?.Id_Akun || '',
+    row?.Tanggal_Upload || '',
+    row?.View || '',
+    row?.Video_FYP || ''
+  ].join('__');
+};
+
 const APPS_SCRIPT_ENDPOINT = '/api/apps-script';
 
 function createClientId(suffix) {
@@ -174,6 +200,8 @@ export default function App() {
   const [filterBulan, setFilterBulan] = useState('Semua');
   const [filterAkun, setFilterAkun] = useState('Semua');
   const [filterFyp, setFilterFyp] = useState('Semua');
+  const [onlyWinningFyp, setOnlyWinningFyp] = useState(false);
+  const [fypCatatanDraft, setFypCatatanDraft] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 20;
 
@@ -247,7 +275,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  const filterSignature = `${filterBulan}|${filterAkun}|${filterFyp}`;
+  const filterSignature = `${filterBulan}|${filterAkun}|${filterFyp}|${onlyWinningFyp ? '1' : '0'}`;
   const [pageFilter, setPageFilter] = useState(filterSignature);
   if (pageFilter !== filterSignature) {
     setPageFilter(filterSignature);
@@ -1125,12 +1153,20 @@ export default function App() {
   const listBulan = ['Semua', ...new Set(data.map(item => getBulanFormat(item.Tanggal_Upload)).filter(b => b !== 'Tanpa Tanggal' && b !== 'Format Tidak Dikenal'))];
   const listAkun = ['Semua', ...new Set(data.map(item => item.Nama_Akun || item.Id_Akun).filter(Boolean))];
 
-  const filteredData = data.filter(item => {
+  const matchesFypBaseFilters = (item) => {
     const matchBulan = filterBulan === 'Semua' || getBulanFormat(item.Tanggal_Upload) === filterBulan;
     const matchAkun = filterAkun === 'Semua' || (item.Nama_Akun || item.Id_Akun) === filterAkun;
     const matchFyp = matchFypFilter(item.Video_FYP, filterFyp);
     return matchBulan && matchAkun && matchFyp;
-  });
+  };
+
+  const fypBaseData = data.filter(matchesFypBaseFilters);
+  const isFypRowStarred = (item) => {
+    const fileKey = getFypFileKey(item);
+    return !!fileKey && !!winningFilesMap[fileKey]?.isWinning;
+  };
+  const starredFypCount = fypBaseData.filter(isFypRowStarred).length;
+  const filteredData = onlyWinningFyp ? fypBaseData.filter(isFypRowStarred) : fypBaseData;
 
   const statTotalVideo = filteredData.length;
   const statTotalView = filteredData.reduce((sum, item) => sum + (parseInt(String(item.View).replace(/[^0-9]/g, '')) || 0), 0);
@@ -1140,6 +1176,9 @@ export default function App() {
   }).length;
 
   const totalPages = Math.ceil(filteredData.length / itemsPerPage);
+  if (pageFilter === filterSignature && totalPages > 0 && currentPage > totalPages) {
+    setCurrentPage(totalPages);
+  }
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
@@ -2103,6 +2142,19 @@ export default function App() {
               <option value="Super Viral">🚀 Super Viral (1M+)</option>
               <option value="Belum FYP">📉 Belum FYP</option>
             </select>
+            <label className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-bold cursor-pointer w-full sm:w-max select-none transition-colors ${onlyWinningFyp ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-amber-50'}`}>
+              <input
+                type="checkbox"
+                checked={onlyWinningFyp}
+                onChange={(e) => setOnlyWinningFyp(e.target.checked)}
+                className="accent-amber-500 w-4 h-4"
+              />
+              <Star className={`w-4 h-4 ${onlyWinningFyp ? 'fill-amber-500 text-amber-500' : 'text-amber-400'}`} />
+              Hanya ⭐
+            </label>
+            <span className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-2 rounded-lg whitespace-nowrap">
+              ⭐ {starredFypCount} video ditandai
+            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-8">
@@ -2147,18 +2199,52 @@ export default function App() {
                   ) : filteredData.length === 0 ? (
                     <tr><td colSpan="5" className="px-6 py-12 text-center text-gray-400 font-semibold">Tidak ada video yang cocok dengan filter.</td></tr>
                   ) : (
-                    currentData.map((row, index) => {
+                    currentData.map((row) => {
                       const badgeStyle = getFypBadgeStyle(row.Video_FYP);
                       const isFyp = badgeStyle.icon !== null;
                       const rawAkun = row.Nama_Akun || row.Id_Akun || '';
+                      const fileKey = getFypFileKey(row);
+                      const fileObj = getFypFileObj(row);
+                      const fileWinInfo = (fileKey && winningFilesMap[fileKey]) || { isWinning: false, catatan: '' };
+                      const savedCatatan = fileWinInfo.catatan || '';
+                      const catatanValue = fileKey && Object.prototype.hasOwnProperty.call(fypCatatanDraft, fileKey)
+                        ? fypCatatanDraft[fileKey]
+                        : savedCatatan;
 
                       return (
-                        <tr key={index} className="hover:bg-gray-50 transition-colors">
+                        <tr key={getFypRowKey(row)} className={`transition-colors ${fileWinInfo.isWinning ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-gray-50'}`}>
                           <td className="px-6 py-4">
-                            <p className="font-bold text-gray-900 truncate max-w-[200px]">{row.Induk_Barang}</p>
-                            <a href={row.Link_Postingan} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-1 w-max">
-                              Buka Video <ExternalLink className="w-3 h-3"/>
-                            </a>
+                            <div className="flex items-start gap-2">
+                              <button
+                                type="button"
+                                disabled={!fileKey}
+                                title={fileKey ? 'Tandai video ini sebagai Bagus / Winning' : 'Tidak bisa ditandai: Id klip dan link postingan kosong'}
+                                aria-pressed={!!fileWinInfo.isWinning}
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => {
+                                  if (!fileKey) return;
+                                  saveFileWinningToSheet(fileObj, !fileWinInfo.isWinning, catatanValue);
+                                }}
+                                className={`mt-0.5 focus:outline-none shrink-0 ${fileKey ? '' : 'cursor-not-allowed opacity-40'}`}
+                              >
+                                <Star className={`w-5 h-5 transition-transform active:scale-125 ${fileWinInfo.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
+                              </button>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <p className="font-bold text-gray-900 truncate max-w-[200px]">{row.Induk_Barang}</p>
+                                  {fileKey && savingFileKey === fileKey && (
+                                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                      <Check className="w-3 h-3" /> Tersimpan
+                                    </span>
+                                  )}
+                                </div>
+                                {row.Link_Postingan ? (
+                                  <a href={row.Link_Postingan} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-1 w-max">
+                                    Buka Video <ExternalLink className="w-3 h-3"/>
+                                  </a>
+                                ) : null}
+                              </div>
+                            </div>
                           </td>
                           <td className="px-4 py-4">
                             <span className="block px-2.5 py-1 rounded-md text-xs font-bold bg-white text-gray-700 border border-gray-300 w-max mb-1 shadow-sm">
@@ -2187,7 +2273,27 @@ export default function App() {
                                 <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
                                   <Edit3 className="h-3.5 w-3.5 text-gray-400" />
                                 </div>
-                                <input type="text" placeholder="Isi catatan evaluasi tim..." className="bg-white border border-gray-300 text-gray-700 text-xs font-medium rounded-md block w-full pl-8 p-1.5 shadow-sm" />
+                                <input
+                                  type="text"
+                                  value={catatanValue}
+                                  disabled={!fileKey}
+                                  placeholder={fileKey ? 'Isi catatan evaluasi tim...' : 'Catatan tidak tersedia tanpa Id klip / link'}
+                                  onChange={(e) => {
+                                    if (!fileKey) return;
+                                    const next = e.target.value;
+                                    setFypCatatanDraft((prev) => ({ ...prev, [fileKey]: next }));
+                                  }}
+                                  onBlur={(e) => {
+                                    if (!fileKey) return;
+                                    if (e.target.value !== (winningFilesMap[fileKey]?.catatan || '')) {
+                                      saveFileWinningToSheet(fileObj, !!winningFilesMap[fileKey]?.isWinning, e.target.value);
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') e.currentTarget.blur();
+                                  }}
+                                  className="bg-white border border-gray-300 text-gray-700 text-xs font-medium rounded-md block w-full pl-8 p-1.5 shadow-sm disabled:bg-gray-50 disabled:text-gray-400"
+                                />
                               </div>
                             </div>
                           </td>
