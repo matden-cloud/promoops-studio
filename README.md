@@ -7,7 +7,7 @@ URL Web App Apps Script dan kunci Gemini tidak lagi ditulis di kode atau di Java
 ## Menjalankan secara lokal
 
 1. Pasang dependensi: `npm install`
-2. Salin `.env.example` menjadi `.env`, lalu isi ketiga variabel. File `.env` tidak boleh di-commit.
+2. Salin `.env.example` menjadi `.env`, lalu isi ketiga variabel wajib. `GEMINI_MODEL` boleh dikosongkan. File `.env` tidak boleh di-commit.
 3. Jalankan `npm run dev`. Vite ikut melayani `/api/apps-script` dan `/api/gemini` dengan nilai dari `.env`.
 4. `npm run build` membuat bundle produksi. `npm run preview` juga melayani kedua endpoint itu. `npm test` menjalankan uji perantara dengan server tiruan.
 
@@ -22,6 +22,7 @@ Isi di **Project Settings → Environment Variables** untuk environment Producti
 | `APPS_SCRIPT_URL` | URL deployment Web App Apps Script yang **baru**, yang berakhiran `/exec` |
 | `APPS_SCRIPT_TOKEN` | Token rahasia yang sama dengan Script Property `APPS_SCRIPT_TOKEN` di Apps Script |
 | `GEMINI_API_KEY` | Kunci Gemini yang baru |
+| `GEMINI_MODEL` | Opsional. Nama model Gemini. Kosong berarti `gemini-3.5-flash-lite`. Hanya huruf, angka, titik, dan minus |
 
 Perantara Apps Script hanya meneruskan aksi yang dipakai dashboard:
 
@@ -31,7 +32,7 @@ Perantara Apps Script hanya meneruskan aksi yang dipakai dashboard:
 
 Aksi lain ditolak. `run_update` dapat berjalan sampai 60 detik (`maxDuration` di `vercel.json`). Naikkan batas itu bila paket Vercel mengizinkan dan bot membutuhkan waktu lebih lama.
 
-Model Gemini tetap `gemini-1.5-flash`. Kunci dikirim dari server lewat header, tidak lewat query string.
+Model default adalah `gemini-3.5-flash-lite`, pengganti resmi `gemini-2.5-flash`. Google menandai `gemini-2.5-flash` deprecated: mulai 1 Desember 2026 permintaan ke model itu dialihkan ke `gemini-3.5-flash-lite`, dan akses model 2.5 dibatasi ke proyek yang sudah pernah memakainya. Nama lain bisa diisi lewat `GEMINI_MODEL`. Untuk `gemini-2.5-flash`, server mematikan thinking (`thinkingBudget` 0) supaya token keluaran tidak habis sebelum jawaban terbentuk. Model Gemini 3 memakai `thinkingLevel` rendah (`MINIMAL` pada Flash-Lite, `LOW` pada Flash lain) dan tidak menerima `temperature`. Batas `maxOutputTokens` adalah 2048. Jika Google menolak, respons memuat `detail` berisi status HTTP, `error.status`, dan `error.message` dari Google; kunci API disensor. Kunci dikirim dari server lewat header, tidak lewat query string.
 
 ## Langkah manual pemilik setelah merge
 

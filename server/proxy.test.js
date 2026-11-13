@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import appsScriptHandler from '../api/apps-script.js';
 import geminiHandler from '../api/gemini.js';
 import { GET_ACTIONS, POST_ACTIONS, handleAppsScriptRequest } from './apps-script.js';
-import { GEMINI_ENDPOINT, handleGeminiRequest } from './gemini.js';
+import { DEFAULT_GEMINI_MODEL, GEMINI_ENDPOINT, buildGeminiEndpoint, handleGeminiRequest } from './gemini.js';
 import { createApiMiddleware } from './vite-api-plugin.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -285,18 +285,21 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
         contents: [{ parts: [{ text: 'jangan dipakai' }] }],
       }),
     }), {
-      env: { GEMINI_API_KEY: apiKey },
-      endpoint: 'http://gemini.local/generate',
+      env: { GEMINI_API_KEY: apiKey, GEMINI_MODEL: '' },
       fetchImpl: async (url, options) => {
         calls += 1;
         const target = new URL(url);
+        assert.equal(target.href, GEMINI_ENDPOINT);
         assert.equal(target.search, '');
         assert.equal(target.searchParams.has('key'), false);
         assert.equal(options.headers['x-goog-api-key'], apiKey);
         const sent = JSON.parse(options.body);
         assert.deepEqual(sent, {
           contents: [{ parts: [{ text: 'Analisa video ini' }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 600 },
+          generationConfig: {
+            maxOutputTokens: 600,
+            thinkingConfig: { thinkingLevel: 'MINIMAL' },
+          },
         });
         return jsonResponse({
           candidates: [{ content: { parts: [{ text: `hasil ${apiKey}` }] } }],
@@ -309,7 +312,9 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
     const body = await response.json();
     assert.equal(body.text, 'hasil [redacted]');
     assert.equal(JSON.stringify(body).includes(apiKey), false);
-    assert.equal(GEMINI_ENDPOINT.endsWith('models/gemini-1.5-flash:generateContent'), true);
+    assert.equal(DEFAULT_GEMINI_MODEL, 'gemini-3.5-flash-lite');
+    assert.equal(GEMINI_ENDPOINT, buildGeminiEndpoint(DEFAULT_GEMINI_MODEL));
+    assert.equal(GEMINI_ENDPOINT.endsWith('models/gemini-3.5-flash-lite:generateContent'), true);
     assert.equal(new URL(GEMINI_ENDPOINT).search, '');
   });
 
@@ -351,15 +356,135 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
       fetchImpl: async (_url, options) => {
         calls += 1;
         const sent = JSON.parse(options.body);
-        assert.equal(sent.generationConfig.maxOutputTokens, 800);
-        assert.equal(sent.generationConfig.temperature, 2);
-        return jsonResponse({ error: { message: `gagal ${env.GEMINI_API_KEY}` } }, 403);
+        assert.equal(sent.generationConfig.maxOutputTokens, 2048);
+        assert.equal(sent.generationConfig.temperature, undefined);
+        assert.equal(sent.generationConfig.thinkingConfig.thinkingLevel, 'MINIMAL');
+        return jsonResponse({
+          error: {
+            status: 'PERMISSION_DENIED',
+            message: `gagal ${env.GEMINI_API_KEY} dan ${encodeURIComponent(env.GEMINI_API_KEY)}`,
+          },
+        }, 403);
       },
     });
     assert.equal(upstreamError.status, 502);
     const errorBody = await upstreamError.json();
+    assert.equal(errorBody.error, 'gemini_error');
+    assert.equal(errorBody.message, 'Gemini menolak permintaan.');
+    assert.equal(errorBody.detail, 'HTTP 403 PERMISSION_DENIED: gagal [redacted] dan [redacted]');
     assert.equal(JSON.stringify(errorBody).includes(env.GEMINI_API_KEY), false);
+    assert.equal(JSON.stringify(errorBody).includes(encodeURIComponent(env.GEMINI_API_KEY)), false);
     assert.equal(calls, 1);
+  });
+
+  test('GEMINI_MODEL membangun endpoint dan mematikan thinking pada gemini-2.5-flash', async () => {
+    const apiKey = 'kunci-model-uji';
+    let seenUrl = '';
+    const response = await handleGeminiRequest(new Request('http://dashboard.local/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'ringkas', temperature: -1, maxOutputTokens: 100 }),
+    }), {
+      env: { GEMINI_API_KEY: apiKey, GEMINI_MODEL: '  gemini-2.5-flash  ' },
+      fetchImpl: async (url, options) => {
+        seenUrl = String(url);
+        const target = new URL(url);
+        assert.equal(target.search, '');
+        assert.equal(options.headers['x-goog-api-key'], apiKey);
+        const sent = JSON.parse(options.body);
+        assert.equal(sent.generationConfig.temperature, 0);
+        assert.equal(sent.generationConfig.maxOutputTokens, 100);
+        assert.deepEqual(sent.generationConfig.thinkingConfig, { thinkingBudget: 0 });
+        return jsonResponse({
+          candidates: [{
+            finishReason: 'STOP',
+            content: {
+              parts: [
+                { text: `pikir ${apiKey}`, thought: true },
+                { text: 'jawaban siap' },
+              ],
+            },
+          }],
+        });
+      },
+    });
+
+    assert.equal(seenUrl, buildGeminiEndpoint('gemini-2.5-flash'));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.text, 'jawaban siap');
+    assert.equal(JSON.stringify(body).includes(apiKey), false);
+    assert.equal(JSON.stringify(body).includes('pikir'), false);
+  });
+
+  test('nama GEMINI_MODEL yang tidak aman ditolak tanpa memanggil Google', async () => {
+    let calls = 0;
+    const apiKey = 'kunci-rahasia-model';
+    const invalid = `../${apiKey}?x=1`;
+    const response = await handleGeminiRequest(new Request('http://dashboard.local/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'halo' }),
+    }), {
+      env: { GEMINI_API_KEY: apiKey, GEMINI_MODEL: invalid },
+      fetchImpl: async () => {
+        calls += 1;
+        return jsonResponse({});
+      },
+    });
+
+    assert.equal(calls, 0);
+    assert.equal(response.status, 500);
+    const body = await response.json();
+    assert.equal(body.error, 'invalid_model');
+    const raw = JSON.stringify(body);
+    assert.equal(raw.includes(apiKey), false);
+    assert.equal(raw.includes(invalid), false);
+    assert.equal(raw.includes('..'), false);
+  });
+
+  test('respons tanpa teks menjelaskan MAX_TOKENS dan SAFETY', async () => {
+    const env = { GEMINI_API_KEY: 'kunci' };
+    const prompt = () => new Request('http://dashboard.local/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'analisa' }),
+    });
+
+    const truncated = await handleGeminiRequest(prompt(), {
+      env,
+      fetchImpl: async () => jsonResponse({
+        candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: '   ' }] } }],
+      }),
+    });
+    assert.equal(truncated.status, 502);
+    const truncatedBody = await truncated.json();
+    assert.equal(truncatedBody.message, 'Jawaban Gemini kosong karena batas token keluaran habis.');
+    assert.equal(truncatedBody.detail, 'finishReason MAX_TOKENS');
+
+    const blocked = await handleGeminiRequest(prompt(), {
+      env,
+      fetchImpl: async () => jsonResponse({
+        promptFeedback: { blockReason: 'SAFETY' },
+        candidates: [],
+      }),
+    });
+    assert.equal(blocked.status, 502);
+    const blockedBody = await blocked.json();
+    assert.equal(blockedBody.message, 'Gemini menolak jawaban karena kebijakan keamanan.');
+    assert.equal(blockedBody.detail, 'blockReason SAFETY');
+
+    const safety = await handleGeminiRequest(prompt(), {
+      env,
+      fetchImpl: async () => jsonResponse({
+        candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: 'disembunyikan', thought: true }] } }],
+      }),
+    });
+    const safetyBody = await safety.json();
+    assert.equal(safety.status, 502);
+    assert.equal(safetyBody.message, 'Gemini menolak jawaban karena kebijakan keamanan.');
+    assert.equal(safetyBody.detail, 'finishReason SAFETY');
+    assert.equal(JSON.stringify(safetyBody).includes('disembunyikan'), false);
   });
 
   test('middleware Node melayani /api dan membiarkan jalur lain lewat', async () => {
