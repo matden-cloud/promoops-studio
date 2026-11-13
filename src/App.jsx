@@ -31,7 +31,7 @@ const normalizeDateToIso = (dateVal) => {
   if (!dateVal) return '';
   const s = String(dateVal).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const slashMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  const slashMatch = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
   if (slashMatch) {
     let p1 = parseInt(slashMatch[1], 10);
     let p2 = parseInt(slashMatch[2], 10);
@@ -63,9 +63,10 @@ export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
   // --- STATE DATA ASLI DARI GOOGLE SHEETS ---
-  const [data, setData] = useState([]);
-  const [rawAssets, setRawAssets] = useState([]);
-  const [klipVideos, setKlipVideos] = useState([]);
+  const [data, setData] = useState([]);               // Data_View (Laporan FYP)
+  const [rawAssets, setRawAssets] = useState([]);     // Raw_Asset + FILE_ASSET (Kolom N)
+  const [klipVideos, setKlipVideos] = useState([]);   // Klip_Vidio (Kolom G)
+  const [publishVideos, setPublishVideos] = useState([]); // Publish (Kolom B)
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isBotRunning, setIsBotRunning] = useState(false);
@@ -84,10 +85,14 @@ export default function App() {
   const [sortBy, setSortBy] = useState('mentahan');
   const [onlyWinning, setOnlyWinning] = useState(false);
 
-  // --- STATE PENYIMPANAN TAB KHUSUS "Data_Winning_Web" ---
-  // Key: `${bulan}__${produk}` atau `Semua__${produk}` -> { isWinning, catatan }
+  // --- STATE PENYIMPANAN BINTANG PER PRODUK ("Data_Winning_Web") ---
   const [winningWebMap, setWinningWebMap] = useState({});
   const [savingProductKey, setSavingProductKey] = useState(null);
+
+  // --- STATE PENYIMPANAN BINTANG PER FILE INDIVIDUAL ("Data_Winning_Files") ---
+  const [winningFilesMap, setWinningFilesMap] = useState({});
+  const [savingFileKey, setSavingFileKey] = useState(null);
+  const [onlyWinningInModal, setOnlyWinningInModal] = useState(false);
 
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
@@ -137,13 +142,9 @@ export default function App() {
         });
         setData(validData.reverse());
 
-        if (Array.isArray(result.rawAssets)) {
-          setRawAssets(result.rawAssets);
-        }
-
-        if (Array.isArray(result.klipVideos)) {
-          setKlipVideos(result.klipVideos);
-        }
+        if (Array.isArray(result.rawAssets)) setRawAssets(result.rawAssets);
+        if (Array.isArray(result.klipVideos)) setKlipVideos(result.klipVideos);
+        if (Array.isArray(result.publishVideos)) setPublishVideos(result.publishVideos);
 
         if (result.violations && result.violations.length > 0) {
           setViolations(result.violations);
@@ -151,25 +152,28 @@ export default function App() {
           setViolationTypes(prev => [...new Set([...prev, ...customTypesFromSheet])]);
         }
 
-        // Muat data dari sheet Data_Winning_Web
         if (Array.isArray(result.winningWeb)) {
           const mapW = {};
           result.winningWeb.forEach(w => {
-            if (w.key) {
-              mapW[w.key] = {
-                isWinning: !!w.isWinning,
-                catatan: w.catatan || ''
-              };
-            }
-            // Juga simpan fallback per nama produk agar lintas bulan tetap terbaca jika dibutuhkan
+            if (w.key) mapW[w.key] = { isWinning: !!w.isWinning, catatan: w.catatan || '' };
             if (w.produk && !mapW[`GLOBAL__${w.produk}`]) {
-              mapW[`GLOBAL__${w.produk}`] = {
-                isWinning: !!w.isWinning,
-                catatan: w.catatan || ''
-              };
+              mapW[`GLOBAL__${w.produk}`] = { isWinning: !!w.isWinning, catatan: w.catatan || '' };
             }
           });
           setWinningWebMap(mapW);
+        }
+
+        if (Array.isArray(result.winningFiles)) {
+          const mapWF = {};
+          result.winningFiles.forEach(wf => {
+            if (wf.fileKey) {
+              mapWF[wf.fileKey] = {
+                isWinning: !!wf.isWinning,
+                catatan: wf.catatan || ''
+              };
+            }
+          });
+          setWinningFilesMap(mapWF);
         }
       }
     } catch (err) {
@@ -181,7 +185,6 @@ export default function App() {
   useEffect(() => { fetchData(); }, []);
   useEffect(() => { setCurrentPage(1); }, [filterBulan, filterAkun, filterFyp]);
 
-  // Helper mendapatkan key penyimpanan Data_Winning_Web
   const getWinningKey = (produkName) => `${rekapBulan}__${produkName}`;
 
   const getProductWinningInfo = (produkName) => {
@@ -192,7 +195,7 @@ export default function App() {
     return { isWinning: false, catatan: '' };
   };
 
-  // --- FUNGSI SIMPAN BINTANG & CATATAN KE TAB "Data_Winning_Web" DI SHEETS ---
+  // --- SIMPAN BINTANG & CATATAN PER PRODUK KE "Data_Winning_Web" ---
   const saveProductWinningToSheet = async (item, newIsWinning, newCatatan) => {
     const key = getWinningKey(item.produk);
     setSavingProductKey(item.produk);
@@ -227,35 +230,68 @@ export default function App() {
     setTimeout(() => setSavingProductKey(null), 700);
   };
 
+  // --- SIMPAN BINTANG & CATATAN PER FILE INDIVIDUAL KE "Data_Winning_Files" ---
+  const saveFileWinningToSheet = async (fileObj, newIsWinning, newCatatan) => {
+    const fKey = fileObj.fileKey;
+    setSavingFileKey(fKey);
+
+    setWinningFilesMap(prev => ({
+      ...prev,
+      [fKey]: { isWinning: newIsWinning, catatan: newCatatan }
+    }));
+
+    try {
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'save_winning_file',
+          data: {
+            fileKey: fKey,
+            kategori: fileObj.kategori || '',
+            produk: fileObj.produk || '',
+            fileName: fileObj.name || '',
+            url: fileObj.url || '',
+            isWinning: newIsWinning,
+            catatan: newCatatan
+          }
+        })
+      });
+    } catch (err) {
+      console.error("Gagal menyimpan ke Data_Winning_Files", err);
+    }
+    setTimeout(() => setSavingFileKey(null), 700);
+  };
+
   // --- DAFTAR PILIHAN FILTER DINAMIS DARI SHEET ASLI ---
   const availableMonthsRekap = useMemo(() => {
     const months = new Set();
     rawAssets.forEach(r => { if (r.month && r.month !== 'Tanpa Tanggal') months.add(r.month); });
     klipVideos.forEach(k => { if (k.month && k.month !== 'Tanpa Tanggal') months.add(k.month); });
-    data.forEach(u => { if (u._month && u._month !== 'Tanpa Tanggal') months.add(u._month); });
+    publishVideos.forEach(p => { if (p.month && p.month !== 'Tanpa Tanggal') months.add(p.month); });
     return ['Semua', ...Array.from(months).sort().reverse()];
-  }, [rawAssets, klipVideos, data]);
+  }, [rawAssets, klipVideos, publishVideos]);
 
   const availableProductsRekap = useMemo(() => {
     const prods = new Set();
     rawAssets.forEach(r => { if (r.produk) prods.add(r.produk); });
     klipVideos.forEach(k => { if (k.produk) prods.add(k.produk); });
-    data.forEach(u => { if (u.Induk_Barang) prods.add(String(u.Induk_Barang).trim()); });
+    publishVideos.forEach(p => { if (p.produk) prods.add(p.produk); });
     return ['Semua', ...Array.from(prods).sort()];
-  }, [rawAssets, klipVideos, data]);
+  }, [rawAssets, klipVideos, publishVideos]);
 
   const availableTeamsRekap = useMemo(() => {
     const teams = new Set();
     rawAssets.forEach(r => { if (r.creator) teams.add(r.creator); });
     klipVideos.forEach(k => { if (k.editor) teams.add(k.editor); });
-    data.forEach(u => { 
-      const ak = u.Nama_Akun || u.Id_Akun;
-      if (ak) teams.add(String(ak).trim());
+    publishVideos.forEach(p => { 
+      if (p.uploader) teams.add(p.uploader);
+      if (p.akun) teams.add(p.akun);
     });
     return ['Semua', ...Array.from(teams).sort()];
-  }, [rawAssets, klipVideos, data]);
+  }, [rawAssets, klipVideos, publishVideos]);
 
-  // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD SESUAI FILTER AKTIF ---
+  // --- FILTERING ITEM MENTAHAN, VIDEO FINAL & UPLOAD (DARI SHEET PUBLISH) ---
   const filteredRawList = useMemo(() => {
     return rawAssets.filter(r => {
       const mBulan = rekapBulan === 'Semua' || r.month === rekapBulan;
@@ -277,15 +313,29 @@ export default function App() {
   }, [klipVideos, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
 
   const filteredUploadList = useMemo(() => {
-    return data.filter(u => {
-      const mBulan = rekapBulan === 'Semua' || u._month === rekapBulan;
-      const mTanggal = !rekapTanggal || u._isoDate === rekapTanggal;
-      const mProduk = rekapProduk === 'Semua' || String(u.Induk_Barang).trim() === rekapProduk;
-      const ak = String(u.Nama_Akun || u.Id_Akun || '').trim();
-      const mTim = rekapTim === 'Semua' || ak.toLowerCase() === rekapTim.toLowerCase();
+    // Jika sheet Publish sudah terbaca, gunakan sheet Publish; jika belum, fallback ke Data_View
+    const sourceList = publishVideos.length > 0 ? publishVideos : data.map((u, idx) => ({
+      id: idx + 1,
+      fileName: u.Induk_Barang || 'Video TikTok',
+      url: u.Link_Postingan,
+      date: u._isoDate,
+      month: u._month,
+      akun: u.Id_Akun || '',
+      uploader: u.Nama_Akun || u.Id_Akun || 'Publisher',
+      produk: String(u.Induk_Barang || 'Tanpa Produk').trim(),
+      status: u.Video_FYP || 'Sukses'
+    }));
+
+    return sourceList.filter(p => {
+      const mBulan = rekapBulan === 'Semua' || p.month === rekapBulan;
+      const mTanggal = !rekapTanggal || p.date === rekapTanggal;
+      const mProduk = rekapProduk === 'Semua' || p.produk === rekapProduk;
+      const mTim = rekapTim === 'Semua' || 
+        (p.uploader || '').toLowerCase() === rekapTim.toLowerCase() || 
+        (p.akun || '').toLowerCase() === rekapTim.toLowerCase();
       return mBulan && mTanggal && mProduk && mTim;
     });
-  }, [data, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
+  }, [publishVideos, data, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
 
   // --- AGREGASI TABEL KIRI: REKAP PER PRODUK ---
   const aggregatedProducts = useMemo(() => {
@@ -301,6 +351,7 @@ export default function App() {
           dipakai: 0,
           videoFinal: 0,
           upload: 0,
+          starredFilesCount: 0,
           creators: new Set(),
           rawFiles: [],
           klipFiles: [],
@@ -318,8 +369,14 @@ export default function App() {
       if (r.status === 'Belum Dipakai') entry.belumDipakai += 1;
       else entry.dipakai += 1;
       if (r.creator) entry.creators.add(r.creator);
+
+      const fileKey = `RAW__${r.id || r.fileName || idx}`;
+      if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+
       entry.rawFiles.push({
-        id: r.id || idx + 1,
+        fileKey,
+        kategori: 'Mentahan (Raw_Asset)',
+        produk: r.produk,
         name: r.fileName || r.id,
         status: r.status || 'Mentahan',
         owner: `${r.creator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
@@ -331,8 +388,14 @@ export default function App() {
       const entry = ensureProd(k.produk);
       entry.videoFinal += 1;
       if (k.editor) entry.creators.add(k.editor);
+
+      const fileKey = `KLIP__${k.id || k.fileName || idx}`;
+      if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+
       entry.klipFiles.push({
-        id: k.id || idx + 1,
+        fileKey,
+        kategori: 'Video Final (Klip_Vidio)',
+        produk: k.produk,
         name: k.fileName || k.id,
         status: `Selesai Edit (${k.date || '-'})`,
         owner: `Editor: ${k.editor || '-'}`,
@@ -340,25 +403,29 @@ export default function App() {
       });
     });
 
-    filteredUploadList.forEach((u, idx) => {
-      const prodName = String(u.Induk_Barang || 'Tanpa Produk').trim();
-      const entry = ensureProd(prodName);
+    filteredUploadList.forEach((p, idx) => {
+      const entry = ensureProd(p.produk);
       entry.upload += 1;
-      const ak = u.Nama_Akun || u.Id_Akun || 'Publisher';
-      entry.creators.add(ak);
+      if (p.uploader) entry.creators.add(p.uploader);
+
+      const fileKey = `PUBLISH__${p.id || p.url || idx}`;
+      if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+
       entry.uploadFiles.push({
-        id: idx + 1,
-        name: `${prodName} — View: ${(parseInt(String(u.View).replace(/[^0-9]/g, '')) || 0).toLocaleString('id-ID')}`,
-        status: u.Video_FYP || 'Tayang di TikTok',
-        owner: `${ak} • ${u._isoDate || u.Tanggal_Upload || ''}`,
-        url: u.Link_Postingan
+        fileKey,
+        kategori: 'Video Terupload (Publish)',
+        produk: p.produk,
+        name: `${p.fileName} (${p.produk})`,
+        status: `${p.status || 'Sukses'} (${p.date || '-'})`,
+        owner: `${p.uploader || 'Publisher'} (${p.akun || '-'})`,
+        url: p.url || 'https://www.tiktok.com/'
       });
     });
 
     return Object.values(map)
-      .filter(item => !onlyWinning || item.isWinning)
+      .filter(item => !onlyWinning || item.isWinning || item.starredFilesCount > 0)
       .sort((a, b) => b[sortBy] - a[sortBy]);
-  }, [filteredRawList, filteredKlipList, filteredUploadList, winningWebMap, rekapBulan, onlyWinning, sortBy]);
+  }, [filteredRawList, filteredKlipList, filteredUploadList, winningWebMap, winningFilesMap, rekapBulan, onlyWinning, sortBy]);
 
   // --- AGREGASI TABEL KANAN: TRACKING HARIAN ---
   const aggregatedDaily = useMemo(() => {
@@ -387,7 +454,9 @@ export default function App() {
       if (!d) return;
       d.mentahan += 1;
       d.rawFiles.push({
-        id: r.id || idx + 1,
+        fileKey: `RAW__${r.id || r.fileName || idx}`,
+        kategori: 'Mentahan (Raw_Asset)',
+        produk: r.produk,
         name: `${r.fileName} (${r.produk})`,
         status: r.status || 'Mentahan',
         owner: r.creator || 'Riset',
@@ -400,7 +469,9 @@ export default function App() {
       if (!d) return;
       d.diedit += 1;
       d.klipFiles.push({
-        id: k.id || idx + 1,
+        fileKey: `KLIP__${k.id || k.fileName || idx}`,
+        kategori: 'Video Final (Klip_Vidio)',
+        produk: k.produk,
         name: `${k.fileName} (${k.produk})`,
         status: 'Selesai Edit',
         owner: `Editor: ${k.editor || '-'}`,
@@ -408,16 +479,18 @@ export default function App() {
       });
     });
 
-    filteredUploadList.forEach((u, idx) => {
-      const d = ensureDate(u._isoDate);
+    filteredUploadList.forEach((p, idx) => {
+      const d = ensureDate(p.date);
       if (!d) return;
       d.upload += 1;
       d.uploadFiles.push({
-        id: idx + 1,
-        name: `${u.Induk_Barang} — View: ${(parseInt(String(u.View).replace(/[^0-9]/g, '')) || 0).toLocaleString('id-ID')}`,
-        status: u.Video_FYP || 'Tayang di TikTok',
-        owner: u.Nama_Akun || u.Id_Akun || 'Publisher',
-        url: u.Link_Postingan
+        fileKey: `PUBLISH__${p.id || p.url || idx}`,
+        kategori: 'Video Terupload (Publish)',
+        produk: p.produk,
+        name: `${p.fileName} (${p.produk})`,
+        status: p.status || 'Sukses',
+        owner: `${p.uploader || 'Publisher'} (${p.akun || '-'})`,
+        url: p.url || 'https://www.tiktok.com/'
       });
     });
 
@@ -432,9 +505,10 @@ export default function App() {
 
   const openRealFilesModal = (title, kategori, filesArray) => {
     if (!filesArray || filesArray.length === 0) return;
+    setOnlyWinningInModal(false);
     setDrillDownModal({
       title: `${kategori} — ${title}`,
-      subtitle: `Menampilkan ${filesArray.length} file asli dari Google Sheets & OneDrive`,
+      subtitle: `Klik bintang ⭐ pada baris file di bawah untuk menandai file video bagus (tersimpan ke Data_Winning_Files)`,
       items: filesArray
     });
   };
@@ -649,15 +723,15 @@ export default function App() {
     setIsAiThinking(true);
     setAiResponse('');
 
-    const topProdsText = aggregatedProducts.slice(0, 8).map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'}, Catatan:${p.catatan || '-'})`).join('; ');
+    const topProdsText = aggregatedProducts.slice(0, 8).map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'}, FileBerbintang:${p.starredFilesCount})`).join('; ');
     const recentDaysText = aggregatedDaily.slice(0, 7).map(d => `${d.labelTanggal} (Raw:${d.mentahan}, Edit:${d.diedit}, Upload:${d.upload}/${d.target})`).join('; ');
 
     const dashboardContext = `
       Konteks Data Asli Web PromoOps Studio Saat Ini:
       - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim ${rekapTim}.
-      - Total Mentahan (Raw_Asset): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
+      - Total Mentahan (Raw_Asset + Kolom N FILE_ASSET): ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
       - Total Video Final (Klip_Vidio Selesai Edit): ${totalFinalRekap} klip.
-      - Total Upload (Data_View Publisher): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
+      - Total Upload (Sheet Publish): ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
       - 8 Produk Teratas: ${topProdsText}.
       - 7 Hari Terakhir: ${recentDaysText}.
       - Total Pelanggaran Tercatat: ${violations.length} kasus.
@@ -681,10 +755,10 @@ export default function App() {
             `**1. Kekuatan Produksi & Stok Mentahan (Data Real-Time Sheets)**\n` +
             `* **Total Aset Mentahan (Raw_Asset):** Tercatat **${totalMentahanRekap} file** di OneDrive (${totalBelumDipakaiRekap} belum dipakai & ${totalDipakaiRekap} sudah dipakai).\n` +
             `* **Kinerja Editor (Klip_Vidio):** Menghasilkan **${totalFinalRekap} klip selesai edit**.\n` +
-            `* **Distribusi Publisher:** Berhasil menayangkan **${totalUploadRekap} video**.\n\n` +
+            `* **Distribusi Publisher (Sheet Publish):** Berhasil menayangkan **${totalUploadRekap} video**.\n\n` +
             `**2. Peringkat Produk Terbanyak & Winning Web**\n` +
             `* Produk tertinggi dipimpin oleh **${aggregatedProducts[0]?.produk || '-'}** (${aggregatedProducts[0]?.mentahan || 0} mentahan, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).\n` +
-            `* Produk yang ditandai Bagus (⭐ di Data_Winning_Web): **${aggregatedProducts.filter(p => p.isWinning).map(p => `${p.produk}${p.catatan ? ` (${p.catatan})` : ''}`).join(', ') || 'Belum ada'}**.\n\n` +
+            `* Produk yang ditandai Bagus (⭐): **${aggregatedProducts.filter(p => p.isWinning || p.starredFilesCount > 0).map(p => `${p.produk} (${p.starredFilesCount} file berbintang)`).join(', ') || 'Belum ada'}**.\n\n` +
             `**3. Evaluasi Pelanggaran**\n` +
             `* Tercatat **${violations.length} kasus pelanggaran** yang sedang dikelola oleh tim.`
           );
@@ -710,7 +784,7 @@ export default function App() {
           `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
           `* **Total Mentahan:** ${totalMentahanRekap} file (${totalBelumDipakaiRekap} siap pakai).\n` +
           `* **Total Produksi (Video Final):** ${totalFinalRekap} video selesai diedit.\n` +
-          `* **Total Upload:** ${totalUploadRekap} video tayang.\n` +
+          `* **Total Upload (Sheet Publish):** ${totalUploadRekap} video tayang.\n` +
           `* **Produk Terbanyak:** ${aggregatedProducts[0]?.produk || '-'} (${aggregatedProducts[0]?.mentahan || 0} raw, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).`
         );
       }
@@ -835,59 +909,111 @@ export default function App() {
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative print:bg-white print:pb-0">
       
       {/* ========================================================================= */}
-      {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE ASLI DARI GOOGLE SHEETS            */}
+      {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE (BISA TANDAI BINTANG PER FILE)     */}
       {/* ========================================================================= */}
       {drillDownModal && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 bg-gray-900 text-white flex items-center justify-between shrink-0">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 bg-gray-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3">
-                <FolderOpen className="w-6 h-6 text-emerald-400" />
+                <FolderOpen className="w-6 h-6 text-emerald-400 shrink-0" />
                 <div>
                   <h3 className="font-bold text-base md:text-lg leading-tight">{drillDownModal.title}</h3>
                   <p className="text-xs text-gray-300 mt-0.5">{drillDownModal.subtitle}</p>
                 </div>
               </div>
-              <button onClick={() => setDrillDownModal(null)} className="text-gray-400 hover:text-white bg-gray-800 p-2 rounded-full">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setOnlyWinningInModal(!onlyWinningInModal)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition-colors ${
+                    onlyWinningInModal ? 'bg-amber-400 text-gray-900 border-amber-300' : 'bg-gray-800 text-gray-200 border-gray-700 hover:bg-gray-700'
+                  }`}
+                >
+                  <Star className={`w-3.5 h-3.5 ${onlyWinningInModal ? 'fill-gray-900 text-gray-900' : 'text-amber-400'}`} />
+                  {onlyWinningInModal ? 'Semua File' : 'Hanya Berbintang'}
+                </button>
+                <button onClick={() => setDrillDownModal(null)} className="text-gray-400 hover:text-white bg-gray-800 p-2 rounded-full">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             <div className="p-4 md:p-6 overflow-y-auto divide-y divide-gray-100 flex-1 bg-gray-50/40">
-              {drillDownModal.items.map((file, idx) => (
-                <div key={idx} className="py-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-white rounded-lg transition-colors">
-                  <div className="flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
-                      {idx + 1}
-                    </div>
-                    <div>
-                      <p className="font-bold text-gray-900 text-sm break-all">{file.name}</p>
-                      <div className="flex flex-wrap items-center gap-2 mt-1">
-                        <span className="text-xs text-gray-500 font-medium">{file.owner}</span>
-                        <span className="text-gray-300">•</span>
-                        <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
-                          String(file.status).includes('Belum') ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        }`}>
-                          {file.status}
-                        </span>
+              {drillDownModal.items
+                .filter(file => !onlyWinningInModal || winningFilesMap[file.fileKey]?.isWinning)
+                .map((file, idx) => {
+                  const fileWinInfo = winningFilesMap[file.fileKey] || { isWinning: false, catatan: '' };
+                  return (
+                    <div key={file.fileKey || idx} className={`py-3.5 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg transition-colors ${fileWinInfo.isWinning ? 'bg-amber-50/50 hover:bg-amber-50/80' : 'hover:bg-white'}`}>
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <button
+                          onClick={() => saveFileWinningToSheet(file, !fileWinInfo.isWinning, fileWinInfo.catatan)}
+                          title="Tandai file video ini sebagai Bagus / Winning"
+                          className="mt-1 focus:outline-none shrink-0"
+                        >
+                          <Star className={`w-5 h-5 transition-transform active:scale-125 ${fileWinInfo.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
+                        </button>
+
+                        <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
+                          {idx + 1}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="font-bold text-gray-900 text-sm break-all">{file.name}</p>
+                            {savingFileKey === file.fileKey && (
+                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
+                                <Check className="w-3 h-3" /> Tersimpan
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <span className="text-xs text-gray-500 font-medium">{file.owner}</span>
+                            <span className="text-gray-300">•</span>
+                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
+                              String(file.status).includes('Belum') ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            }`}>
+                              {file.status}
+                            </span>
+                          </div>
+
+                          <input
+                            type="text"
+                            defaultValue={fileWinInfo.catatan || ''}
+                            placeholder="Catatan file ini (Enter u/ simpan ke Data_Winning_Files)..."
+                            onBlur={(e) => {
+                              if (e.target.value !== (fileWinInfo.catatan || '')) {
+                                saveFileWinningToSheet(file, fileWinInfo.isWinning, e.target.value);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') e.target.blur();
+                            }}
+                            className="mt-2 bg-white border border-gray-200 focus:border-amber-400 text-gray-700 text-xs rounded-md px-2.5 py-1 w-full max-w-md focus:outline-none"
+                          />
+                        </div>
                       </div>
+
+                      {file.url && (
+                        <a 
+                          href={file.url} 
+                          target="_blank" 
+                          rel="noreferrer" 
+                          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
+                        >
+                          Buka File <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      )}
                     </div>
-                  </div>
-                  {file.url && (
-                    <a 
-                      href={file.url} 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
-                    >
-                      Buka File <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
-                </div>
-              ))}
+                  );
+                })}
             </div>
 
-            <div className="px-6 py-3 bg-white border-t border-gray-200 flex justify-end shrink-0">
+            <div className="px-6 py-3 bg-white border-t border-gray-200 flex justify-between items-center shrink-0">
+              <span className="text-xs text-gray-500 font-semibold">
+                ⭐ {drillDownModal.items.filter(f => winningFilesMap[f.fileKey]?.isWinning).length} file ditandai bagus pada daftar ini
+              </span>
               <button onClick={() => setDrillDownModal(null)} className="px-5 py-2 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
                 Tutup Daftar File
               </button>
@@ -1151,7 +1277,7 @@ export default function App() {
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
               <p className="text-gray-500 mt-1">
-                Sheet AppSheet utama <span className="font-semibold text-emerald-700">100% Hanya Baca (Aman)</span>. Tanda bintang ⭐ & catatan produk disimpan terpisah ke tab <span className="font-semibold text-amber-700">Data_Winning_Web</span>.
+                Nama produk diambil dari <span className="font-semibold text-gray-700">Id_Induk_Barang (Project)</span>, Tanggal Mentahan dari <span className="font-semibold text-gray-700">Kolom N (FILE_ASSET)</span>, & Upload dari sheet <span className="font-semibold text-gray-700">Publish</span>.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 print:hidden">
@@ -1201,7 +1327,7 @@ export default function App() {
             </div>
 
             <div>
-              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Kreator / Editor / Akun</label>
+              <label className="text-xs font-bold text-gray-500 uppercase mb-1 block">Kreator / Editor / Uploader</label>
               <select value={rekapTim} onChange={(e) => setRekapTim(e.target.value)} className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg block w-full p-2.5 font-semibold">
                 {availableTeamsRekap.map(t => (
                   <option key={t} value={t}>{t === 'Semua' ? '👥 Semua Tim & Akun' : t}</option>
@@ -1227,7 +1353,7 @@ export default function App() {
                 </h3>
                 <p className="text-xs text-gray-500 mt-1">{totalBelumDipakaiRekap} belum dipakai • {totalDipakaiRekap} dipakai</p>
               </div>
-              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">OneDrive</div>
+              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl font-bold text-xs">Kolom N</div>
             </div>
 
             <div 
@@ -1251,31 +1377,31 @@ export default function App() {
             <div 
               onClick={() => openRealFilesModal(
                 rekapProduk === 'Semua' ? `Semua Produk (${rekapBulan})` : rekapProduk,
-                'Video Terupload (Publisher)',
+                'Video Terupload (Publish)',
                 aggregatedProducts.flatMap(p => p.uploadFiles)
               )}
               className="bg-white p-5 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center cursor-pointer hover:border-emerald-400 hover:shadow-md transition-all group"
             >
               <div>
-                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">3. Total Upload (Publisher)</p>
+                <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">3. Total Upload (Sheet Publish)</p>
                 <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-emerald-600 transition-colors">
                   {loading ? '...' : totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang (Klik)</span>
                 </h3>
                 <p className="text-xs text-emerald-600 font-semibold mt-1">Target: 5 Akun × 3 Video (15/hari)</p>
               </div>
-              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs">5 Akun</div>
+              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs">Publish</div>
             </div>
           </div>
 
-          {/* 3. DUA TABEL UTAMA: PERINGKAT PRODUK (DENGAN CATATAN WINNING WEB) & TRACKING HARIAN */}
+          {/* 3. DUA TABEL UTAMA */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             
-            {/* TABEL KIRI: PERINGKAT PER PRODUK + SIMPAN KE Data_Winning_Web */}
+            {/* TABEL KIRI: PERINGKAT PER PRODUK */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-200 flex flex-col sm:flex-row justify-between sm:items-center gap-2 bg-gray-50">
                 <div>
                   <h3 className="font-bold text-gray-900 text-sm">Peringkat per Produk ({aggregatedProducts.length} Produk)</h3>
-                  <p className="text-xs text-gray-500">Klik ⭐ atau isi catatan untuk menyimpan ke sheet <span className="font-bold text-amber-700">Data_Winning_Web</span></p>
+                  <p className="text-xs text-gray-500">Klik ⭐ produk atau klik angka jumlah untuk menandai ⭐ per file video</p>
                 </div>
                 <div className="flex items-center gap-1 text-xs print:hidden">
                   <span className="text-gray-500 font-semibold mr-1">Urutkan:</span>
@@ -1301,19 +1427,24 @@ export default function App() {
                       <tr><td colSpan="4" className="py-8 text-center text-gray-400 font-semibold">Tidak ada data produk sesuai filter.</td></tr>
                     ) : (
                       aggregatedProducts.map((item) => (
-                        <tr key={item.produk} className={`hover:bg-gray-50 ${item.isWinning ? 'bg-amber-50/20' : ''}`}>
+                        <tr key={item.produk} className={`hover:bg-gray-50 ${item.isWinning || item.starredFilesCount > 0 ? 'bg-amber-50/20' : ''}`}>
                           <td className="py-3 px-4">
                             <div className="flex items-start gap-2.5">
                               <button 
                                 onClick={() => saveProductWinningToSheet(item, !item.isWinning, item.catatan)}
-                                title="Klik untuk tandai Mentahan Bagus & simpan ke Data_Winning_Web"
+                                title="Klik untuk tandai Produk Bagus & simpan ke Data_Winning_Web"
                                 className="focus:outline-none mt-0.5"
                               >
                                 <Star className={`w-4 h-4 transition-colors ${item.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
                               </button>
                               <div className="w-full">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <p className="font-bold text-gray-900">{item.produk}</p>
+                                  {item.starredFilesCount > 0 && (
+                                    <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded-full">
+                                      ⭐ {item.starredFilesCount} file bagus
+                                    </span>
+                                  )}
                                   {savingProductKey === item.produk && (
                                     <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-0.5 bg-emerald-50 px-1.5 py-0.5 rounded">
                                       <Check className="w-3 h-3" /> Tersimpan
@@ -1323,7 +1454,6 @@ export default function App() {
                                 <span className="text-[11px] text-gray-400 font-medium block mb-1.5">
                                   {Array.from(item.creators).slice(0, 3).join(', ') || 'Tim'} • Sisa {item.belumDipakai} raw
                                 </span>
-                                {/* Input Catatan Evaluasi Mentahan yang tersimpan ke Data_Winning_Web */}
                                 <input
                                   type="text"
                                   defaultValue={item.catatan || ''}
@@ -1334,9 +1464,7 @@ export default function App() {
                                     }
                                   }}
                                   onKeyDown={(e) => {
-                                    if (e.key === 'Enter') {
-                                      e.target.blur();
-                                    }
+                                    if (e.key === 'Enter') e.target.blur();
                                   }}
                                   className="bg-gray-50 focus:bg-white border border-gray-200 focus:border-amber-400 text-gray-700 text-[11px] rounded px-2 py-1 w-full max-w-[230px] focus:outline-none print:border-none print:bg-transparent print:p-0"
                                 />
@@ -1361,7 +1489,7 @@ export default function App() {
                           </td>
                           <td className="py-3 px-3 text-center bg-emerald-50/30">
                             <button 
-                              onClick={() => openRealFilesModal(item.produk, 'Video Terupload (Publisher)', item.uploadFiles)}
+                              onClick={() => openRealFilesModal(item.produk, 'Video Terupload (Publish)', item.uploadFiles)}
                               className="font-black text-emerald-600 hover:bg-emerald-100 px-2.5 py-1 rounded-lg underline decoration-dotted underline-offset-4 transition-colors"
                             >
                               {item.upload}
@@ -1380,7 +1508,7 @@ export default function App() {
               <div className="px-5 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
                 <div>
                   <h3 className="font-bold text-gray-900 text-sm">Tracking Harian ({aggregatedDaily.length} Tanggal Aktif)</h3>
-                  <p className="text-xs text-gray-500">Klik angka harian untuk membuka daftar file pada tanggal tersebut</p>
+                  <p className="text-xs text-gray-500">Klik angka harian untuk membuka & memberi bintang pada file di tanggal tersebut</p>
                 </div>
               </div>
               <div className="overflow-x-auto max-h-[600px]">
@@ -1423,7 +1551,7 @@ export default function App() {
                             </td>
                             <td className="py-3 px-3 text-center">
                               <button 
-                                onClick={() => openRealFilesModal(`Tanggal ${day.labelTanggal}`, 'Video Terupload (Publisher)', day.uploadFiles)}
+                                onClick={() => openRealFilesModal(`Tanggal ${day.labelTanggal}`, 'Video Terupload (Publish)', day.uploadFiles)}
                                 className={`font-black px-2 py-0.5 rounded underline decoration-dotted ${isTargetMet ? 'text-emerald-600 hover:bg-emerald-50' : 'text-amber-600 hover:bg-amber-50'}`}
                               >
                                 {day.upload}
