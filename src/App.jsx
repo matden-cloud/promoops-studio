@@ -98,6 +98,13 @@ async function requestGemini(prompt, generationConfig) {
   }
 }
 
+function geminiFailureMessage(result) {
+  const message = typeof result?.message === 'string' ? result.message.trim() : '';
+  const detail = typeof result?.detail === 'string' ? result.detail.trim() : '';
+  if (message && detail && message !== detail) return `${message}\n${detail}`;
+  return message || detail;
+}
+
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
@@ -1003,7 +1010,7 @@ export default function App() {
     `;
 
     try {
-      const { response, result } = await requestGemini(fullPrompt, { temperature: 0.7, maxOutputTokens: 800 });
+      const { response, result } = await requestGemini(fullPrompt, { temperature: 0.7, maxOutputTokens: 2048 });
       if (response.status === 503) {
         setTimeout(() => {
           setAiResponse(
@@ -1051,11 +1058,11 @@ export default function App() {
     `;
 
     try {
-      const { result } = await requestGemini(prompt, { temperature: 0.7, maxOutputTokens: 600 });
+      const { result } = await requestGemini(prompt, { temperature: 0.7, maxOutputTokens: 2048 });
       if (result?.text) {
         setAnalysisResult(result.text);
       } else {
-        setAnalysisResult("Gagal mendapatkan analisa dari bot AI.");
+        setAnalysisResult(geminiFailureMessage(result) || "Gagal mendapatkan analisa dari bot AI.");
       }
     } catch {
       setAnalysisResult("Terjadi kesalahan koneksi saat menghubungi server AI.");
