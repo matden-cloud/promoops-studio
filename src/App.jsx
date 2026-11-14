@@ -8,6 +8,17 @@ import {
   Play, Smartphone
 } from 'lucide-react';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
+import SearchBox from './SearchBox.jsx';
+import { useDebouncedQuery } from './useDebouncedQuery.js';
+import {
+  fileListSearchFields,
+  filterBySearch,
+  fypRowSearchFields,
+  klipSearchFields,
+  matchesSearchQuery,
+  publishSearchFields,
+  rawAssetSearchFields,
+} from './search.js';
 
 const DEFAULT_VIOLATION_TYPES = [
   "Produk Berbahaya / Tajam",
@@ -335,6 +346,9 @@ export default function App() {
   const [onlyWinningFyp, setOnlyWinningFyp] = useState(false);
   const [fypCatatanDraft, setFypCatatanDraft] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
+  const [fypQuery, debouncedFypQuery, setFypQuery] = useDebouncedQuery();
+  const [pipelineQuery, debouncedPipelineQuery, setPipelineQuery] = useDebouncedQuery();
+  const [fileListQuery, debouncedFileListQuery, setFileListQuery] = useDebouncedQuery();
   const itemsPerPage = 20;
 
   // --- FUNGSI TARIK SELURUH DATA DARI GOOGLE SHEETS ---
@@ -407,7 +421,7 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  const filterSignature = `${filterBulan}|${filterAkun}|${filterFyp}|${onlyWinningFyp ? '1' : '0'}`;
+  const filterSignature = `${filterBulan}|${filterAkun}|${filterFyp}|${onlyWinningFyp ? '1' : '0'}|${encodeURIComponent(debouncedFypQuery)}`;
   const [pageFilter, setPageFilter] = useState(filterSignature);
   if (pageFilter !== filterSignature) {
     setPageFilter(filterSignature);
@@ -569,6 +583,7 @@ export default function App() {
       const mProduk = rekapProduk === 'Semua' || r.produk === rekapProduk;
       const mTim = rekapTim === 'Semua' || normalizePersonName(r.creator).toLowerCase() === rekapTim.toLowerCase();
       if (!mProduk || !mTim) return;
+      if (!matchesSearchQuery(debouncedPipelineQuery, rawAssetSearchFields(r))) return;
 
       const m = ensureMonth(r.month);
       if (!m) return;
@@ -596,6 +611,7 @@ export default function App() {
         normalizePersonName(k.editor).toLowerCase() === rekapTim.toLowerCase() || 
         (k.akunTarget || '').toUpperCase() === rekapTim.toUpperCase();
       if (!mProduk || !mTim) return;
+      if (!matchesSearchQuery(debouncedPipelineQuery, klipSearchFields(k, accountLookup[(k.akunTarget || '').toUpperCase()]))) return;
 
       const m = ensureMonth(k.month);
       if (!m) return;
@@ -634,6 +650,7 @@ export default function App() {
         normalizePersonName(p.uploader).toLowerCase() === rekapTim.toLowerCase() || 
         (p.akun || '').toUpperCase() === rekapTim.toUpperCase();
       if (!mProduk || !mTim) return;
+      if (!matchesSearchQuery(debouncedPipelineQuery, publishSearchFields(p, accountLookup[(p.akun || '').toUpperCase()] || p.akunLabel))) return;
 
       const m = ensureMonth(p.month);
       if (!m) return;
@@ -695,7 +712,7 @@ export default function App() {
         powerPercentage
       };
     });
-  }, [rawAssets, klipVideos, publishVideos, data, rekapProduk, rekapTim, accountLookup]);
+  }, [rawAssets, klipVideos, publishVideos, data, rekapProduk, rekapTim, accountLookup, debouncedPipelineQuery]);
 
   // Potong kartu bulan sesuai pilihan tampilan (Per 3 Bulan, Per 6 Bulan, atau Semua)
   const totalMonthPages = Math.max(1, Math.ceil(monthlyPowerCards.length / monthViewLimit));
@@ -753,6 +770,23 @@ export default function App() {
     });
   }, [publishVideos, data, rekapBulan, rekapTanggal, rekapProduk, rekapTim]);
 
+  const visibleRawList = useMemo(
+    () => filterBySearch(filteredRawList, debouncedPipelineQuery, rawAssetSearchFields),
+    [filteredRawList, debouncedPipelineQuery]
+  );
+  const visibleKlipList = useMemo(
+    () => filterBySearch(filteredKlipList, debouncedPipelineQuery, (k) => (
+      klipSearchFields(k, accountLookup[(k.akunTarget || '').toUpperCase()])
+    )),
+    [filteredKlipList, debouncedPipelineQuery, accountLookup]
+  );
+  const visibleUploadList = useMemo(
+    () => filterBySearch(filteredUploadList, debouncedPipelineQuery, (p) => (
+      publishSearchFields(p, accountLookup[(p.akun || '').toUpperCase()] || p.akunLabel)
+    )),
+    [filteredUploadList, debouncedPipelineQuery, accountLookup]
+  );
+
   // --- AGREGASI TABEL KIRI: REKAP PER PRODUK ---
   const aggregatedProducts = useMemo(() => {
     const map = {};
@@ -780,7 +814,7 @@ export default function App() {
       return map[key];
     };
 
-    filteredRawList.forEach((r, idx) => {
+    visibleRawList.forEach((r, idx) => {
       const entry = ensureProd(r.produk);
       entry.mentahan += 1;
       if (r.status === 'Belum Dipakai') entry.belumDipakai += 1;
@@ -803,7 +837,7 @@ export default function App() {
       });
     });
 
-    filteredKlipList.forEach((k, idx) => {
+    visibleKlipList.forEach((k, idx) => {
       const entry = ensureProd(k.produk);
       entry.videoFinal += 1;
       const cleanEditor = normalizePersonName(k.editor);
@@ -824,7 +858,7 @@ export default function App() {
       });
     });
 
-    filteredUploadList.forEach((p, idx) => {
+    visibleUploadList.forEach((p, idx) => {
       const entry = ensureProd(p.produk);
       entry.upload += 1;
       const cleanUploader = normalizePersonName(p.uploader);
@@ -850,7 +884,7 @@ export default function App() {
     return Object.values(map)
       .filter(item => !onlyWinning || item.isWinning || item.starredFilesCount > 0)
       .sort((a, b) => b[sortBy] - a[sortBy]);
-  }, [filteredRawList, filteredKlipList, filteredUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy]);
+  }, [visibleRawList, visibleKlipList, visibleUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy]);
 
   // --- AGREGASI TABEL KANAN: TRACKING HARIAN ---
   const aggregatedDaily = useMemo(() => {
@@ -874,7 +908,7 @@ export default function App() {
       return map[isoDate];
     };
 
-    filteredRawList.forEach((r, idx) => {
+    visibleRawList.forEach((r, idx) => {
       const d = ensureDate(r.date);
       if (!d) return;
       d.mentahan += 1;
@@ -890,7 +924,7 @@ export default function App() {
       });
     });
 
-    filteredKlipList.forEach((k, idx) => {
+    visibleKlipList.forEach((k, idx) => {
       const d = ensureDate(k.date);
       if (!d) return;
       d.diedit += 1;
@@ -906,7 +940,7 @@ export default function App() {
       });
     });
 
-    filteredUploadList.forEach((p, idx) => {
+    visibleUploadList.forEach((p, idx) => {
       const d = ensureDate(p.date);
       if (!d) return;
       d.upload += 1;
@@ -924,17 +958,20 @@ export default function App() {
     });
 
     return Object.values(map).sort((a, b) => b.tanggal.localeCompare(a.tanggal));
-  }, [filteredRawList, filteredKlipList, filteredUploadList, accountLookup]);
+  }, [visibleRawList, visibleKlipList, visibleUploadList, accountLookup]);
 
-  const totalMentahanRekap = filteredRawList.length;
-  const totalBelumDipakaiRekap = filteredRawList.filter(r => r.status === 'Belum Dipakai').length;
+  const totalMentahanRekap = visibleRawList.length;
+  const totalBelumDipakaiRekap = visibleRawList.filter(r => r.status === 'Belum Dipakai').length;
   const totalDipakaiRekap = totalMentahanRekap - totalBelumDipakaiRekap;
-  const totalFinalRekap = filteredKlipList.length;
-  const totalUploadRekap = filteredUploadList.length;
+  const totalFinalRekap = visibleKlipList.length;
+  const totalUploadRekap = visibleUploadList.length;
+  const pipelineTotal = filteredRawList.length + filteredKlipList.length + filteredUploadList.length;
+  const pipelineShown = totalMentahanRekap + totalFinalRekap + totalUploadRekap;
 
   const openRealFilesModal = (title, kategori, filesArray) => {
     if (!filesArray || filesArray.length === 0) return;
     setOnlyWinningInModal(false);
+    setFileListQuery('');
     setDrillDownModal({
       title: `${kategori} — ${title}`,
       subtitle: `Klik bintang ⭐ pada baris file di bawah untuk menandai file video bagus (tersimpan ke Data_Winning_Files)`,
@@ -1378,7 +1415,12 @@ export default function App() {
     return !!fileKey && !!winningFilesMap[fileKey]?.isWinning;
   };
   const starredFypCount = fypBaseData.filter(isFypRowStarred).length;
-  const filteredData = onlyWinningFyp ? fypBaseData.filter(isFypRowStarred) : fypBaseData;
+  const fypScoped = onlyWinningFyp ? fypBaseData.filter(isFypRowStarred) : fypBaseData;
+  const filteredData = filterBySearch(fypScoped, debouncedFypQuery, (item) => fypRowSearchFields(item, [
+    accountLookup[String(item.Nama_Akun || item.Id_Akun || '').toUpperCase()],
+    getBulanFormat(item.Tanggal_Upload),
+    winningFilesMap[getFypFileKey(item)]?.catatan,
+  ]));
 
   const statTotalVideo = filteredData.length;
   const statTotalView = filteredData.reduce((sum, item) => sum + (parseInt(String(item.View).replace(/[^0-9]/g, '')) || 0), 0);
@@ -1394,6 +1436,9 @@ export default function App() {
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
+  const modalItems = drillDownModal?.items || [];
+  const modalAfterStar = modalItems.filter((file) => !onlyWinningInModal || winningFilesMap[file.fileKey]?.isWinning);
+  const modalVisible = filterBySearch(modalAfterStar, debouncedFileListQuery, fileListSearchFields);
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative print:bg-white print:pb-0">
@@ -1428,10 +1473,24 @@ export default function App() {
               </div>
             </div>
 
-            <div className="p-4 md:p-6 overflow-y-auto divide-y divide-gray-100 flex-1 bg-gray-50/40">
-              {drillDownModal.items
-                .filter(file => !onlyWinningInModal || winningFilesMap[file.fileKey]?.isWinning)
-                .map((file, idx) => {
+            <div className="overflow-y-auto flex-1 bg-gray-50/40">
+              <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-4 py-3 md:px-6">
+                <SearchBox
+                  id="search-daftar-file"
+                  value={fileListQuery}
+                  onChange={setFileListQuery}
+                  shown={modalVisible.length}
+                  total={modalAfterStar.length}
+                />
+              </div>
+              <div className="divide-y divide-gray-100 p-4 md:px-6">
+              {modalVisible.length === 0 ? (
+                <p className="py-12 text-center text-sm font-semibold text-gray-400">
+                  {modalAfterStar.length === 0
+                    ? 'Tidak ada file yang cocok dengan filter.'
+                    : 'Tidak ada file yang cocok dengan pencarian.'}
+                </p>
+              ) : modalVisible.map((file, idx) => {
                   const fileWinInfo = winningFilesMap[file.fileKey] || { isWinning: false, catatan: '' };
                   return (
                     <div key={file.fileKey || idx} className={`py-3.5 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg transition-colors ${fileWinInfo.isWinning ? 'bg-amber-50/50 hover:bg-amber-50/80' : 'hover:bg-white'}`}>
@@ -1489,6 +1548,7 @@ export default function App() {
                     </div>
                   );
                 })}
+              </div>
             </div>
 
             <div className="px-6 py-3 bg-white border-t border-gray-200 flex justify-between items-center shrink-0">
@@ -1755,7 +1815,6 @@ export default function App() {
       {/* ========================================================================= */}
       {activeMenu === 'pipeline' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
-          
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
@@ -1771,6 +1830,18 @@ export default function App() {
                 <Star className={`w-4 h-4 ${onlyWinning ? 'fill-amber-500 text-amber-500' : 'text-gray-400'}`} />
                 {onlyWinning ? 'Menampilkan Mentahan Bagus ⭐' : 'Filter Mentahan Bagus'}
               </button>
+            </div>
+          </div>
+
+          <div className="mb-6 print:hidden">
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <SearchBox
+                id="search-pipeline"
+                value={pipelineQuery}
+                onChange={setPipelineQuery}
+                shown={pipelineShown}
+                total={pipelineTotal}
+              />
             </div>
           </div>
 
@@ -2306,7 +2377,6 @@ export default function App() {
       {/* ========================================================================= */}
       {activeMenu === 'analitik' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
-          
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div className="w-full text-center md:text-left">
               <h2 className="text-2xl font-bold text-gray-900">Performa FYP & Evaluasi</h2>
@@ -2325,6 +2395,18 @@ export default function App() {
                   <><PlayCircle className="w-4 h-4" /> Jalankan Bot Scraper</>
                 )}
               </button>
+            </div>
+          </div>
+
+          <div className="mb-6 print:hidden">
+            <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+              <SearchBox
+                id="search-fyp"
+                value={fypQuery}
+                onChange={setFypQuery}
+                shown={filteredData.length}
+                total={fypScoped.length}
+              />
             </div>
           </div>
 
