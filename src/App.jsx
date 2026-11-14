@@ -10,6 +10,7 @@ import {
 import { originalUrlForFypRow, originalUrlForPublish } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
 import SearchBox from './SearchBox.jsx';
+import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
 import {
   fileListSearchFields,
@@ -20,6 +21,18 @@ import {
   publishSearchFields,
   rawAssetSearchFields,
 } from './search.js';
+import {
+  applyStarChange,
+  buildStarIndex,
+  compareMonthOptions,
+  compareStarMonths,
+  displayedStarFromIndex,
+  formatStarBadge,
+  formatYearMonth,
+  resolveStarState,
+  starMonthForSelection,
+  toYearMonth,
+} from './starHistory.js';
 
 const DEFAULT_VIOLATION_TYPES = [
   "Produk Berbahaya / Tajam",
@@ -98,7 +111,8 @@ const getFypFileObj = (row) => ({
   kategori: 'Laporan FYP',
   produk: row?.Induk_Barang || '',
   name: row?.Nama_File || row?.Induk_Barang || '',
-  url: row?.Link_Postingan || ''
+  url: row?.Link_Postingan || '',
+  month: row?._month || '',
 });
 
 const getFypRowKey = (row) => {
@@ -338,6 +352,10 @@ export default function App() {
   const [winningWebMap, setWinningWebMap] = useState({});
   const [savingProductKey, setSavingProductKey] = useState(null);
   const [winningFilesMap, setWinningFilesMap] = useState({});
+  const [starMode, setStarMode] = useState('legacy');
+  const [starRows, setStarRows] = useState([]);
+  const [fypCompareBulan, setFypCompareBulan] = useState('');
+  const [rekapCompareBulan, setRekapCompareBulan] = useState('');
   const [savingFileKey, setSavingFileKey] = useState(null);
   const [onlyWinningInModal, setOnlyWinningInModal] = useState(false);
 
@@ -428,6 +446,10 @@ export default function App() {
           });
           setWinningFilesMap(mapWF);
         }
+
+        const resolvedStars = resolveStarState(result);
+        setStarMode(resolvedStars.mode);
+        setStarRows(resolvedStars.rows);
       }
     } catch {
       setError("Terjadi kesalahan jaringan.");
@@ -501,9 +523,24 @@ export default function App() {
     setTimeout(() => setSavingProductKey(null), 700);
   };
 
-  const saveFileWinningToSheet = async (fileObj, newIsWinning, newCatatan) => {
+  const saveFileWinningToSheet = async (fileObj, newIsWinning, newCatatan, reportMonth) => {
     const fKey = fileObj.fileKey;
+    if (!fKey) return;
+    const bulan = toYearMonth(reportMonth) || starMonthForSelection('', fileObj.month);
     setSavingFileKey(fKey);
+
+    if (starMode === 'history' && bulan) {
+      setStarRows((prev) => applyStarChange(prev, {
+        fileKey: fKey,
+        bulan,
+        isWinning: newIsWinning,
+        catatan: newCatatan,
+        kategori: fileObj.kategori || '',
+        produk: fileObj.produk || '',
+        fileName: fileObj.name || '',
+        url: fileObj.url || '',
+      }));
+    }
 
     setWinningFilesMap(prev => ({
       ...prev,
@@ -523,7 +560,8 @@ export default function App() {
             fileName: fileObj.name || '',
             url: fileObj.url || '',
             isWinning: newIsWinning,
-            catatan: newCatatan
+            catatan: newCatatan,
+            ...(bulan ? { bulan } : {}),
           }
         })
       });
@@ -622,7 +660,8 @@ export default function App() {
         status: r.status || 'Mentahan',
         owner: `${normalizePersonName(r.creator) || 'Riset'} • ${r.date || ''}`,
         url: r.url || 'https://onedrive.live.com/',
-        linkHp: fileLinkHp(r)
+        linkHp: fileLinkHp(r),
+        month: m.month,
       });
     });
 
@@ -649,7 +688,8 @@ export default function App() {
         status: `Selesai Edit (${k.date || '-'})`,
         owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
         url: k.url || 'https://onedrive.live.com/',
-        linkHp: fileLinkHp(k)
+        linkHp: fileLinkHp(k),
+        month: m.month,
       });
     });
 
@@ -691,7 +731,8 @@ export default function App() {
         owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
         url: p.url || 'https://www.tiktok.com/',
         linkHp: fileLinkHp(p),
-        klipId: p.klipId || ''
+        klipId: p.klipId || '',
+        month: m.month,
       });
     });
 
@@ -811,6 +852,11 @@ export default function App() {
     [filteredUploadList, debouncedPipelineQuery, accountLookup]
   );
 
+  const starIndex = useMemo(() => buildStarIndex(starRows), [starRows]);
+  const lookupFileStar = (fileKey, bulan) => (
+    displayedStarFromIndex(starMode, starIndex, fileKey, bulan, winningFilesMap)
+  );
+
   // --- AGREGASI TABEL KIRI: REKAP PER PRODUK ---
   const aggregatedProducts = useMemo(() => {
     const map = {};
@@ -847,7 +893,10 @@ export default function App() {
       if (cleanCreator) entry.creators.add(cleanCreator);
 
       const fileKey = `RAW__${r.id || r.fileName || idx}`;
-      if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+      const rawStarMonth = starMonthForSelection(rekapBulan, r.month);
+      if (displayedStarFromIndex(starMode, starIndex, fileKey, rawStarMonth, winningFilesMap).isWinning) {
+        entry.starredFilesCount += 1;
+      }
 
       entry.rawFiles.push({
         fileKey,
@@ -857,7 +906,8 @@ export default function App() {
         status: r.status || 'Mentahan',
         owner: `${cleanCreator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
         url: r.url || 'https://onedrive.live.com/',
-        linkHp: fileLinkHp(r)
+        linkHp: fileLinkHp(r),
+        month: r.month || '',
       });
     });
 
@@ -868,7 +918,10 @@ export default function App() {
       if (cleanEditor) entry.creators.add(cleanEditor);
 
       const fileKey = `KLIP__${k.id || k.fileName || idx}`;
-      if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+      const klipStarMonth = starMonthForSelection(rekapBulan, k.month);
+      if (displayedStarFromIndex(starMode, starIndex, fileKey, klipStarMonth, winningFilesMap).isWinning) {
+        entry.starredFilesCount += 1;
+      }
 
       entry.klipFiles.push({
         fileKey,
@@ -878,7 +931,8 @@ export default function App() {
         status: `Selesai Edit (${k.date || '-'})`,
         owner: `Editor: ${cleanEditor || '-'} • ${accountLookup[(k.akunTarget || '').toUpperCase()] || k.akunTarget || ''}`,
         url: k.url || 'https://onedrive.live.com/',
-        linkHp: fileLinkHp(k)
+        linkHp: fileLinkHp(k),
+        month: k.month || '',
       });
     });
 
@@ -889,7 +943,10 @@ export default function App() {
       if (cleanUploader) entry.creators.add(cleanUploader);
 
       const fileKey = `PUBLISH__${p.id || p.url || idx}`;
-      if (winningFilesMap[fileKey]?.isWinning) entry.starredFilesCount += 1;
+      const publishStarMonth = starMonthForSelection(rekapBulan, p.month);
+      if (displayedStarFromIndex(starMode, starIndex, fileKey, publishStarMonth, winningFilesMap).isWinning) {
+        entry.starredFilesCount += 1;
+      }
 
       const fullAkunLabel = accountLookup[(p.akun || '').toUpperCase()] || p.akunLabel || p.akun || '-';
 
@@ -902,14 +959,15 @@ export default function App() {
         owner: `${cleanUploader || 'Publisher'} • ${fullAkunLabel}`,
         url: p.url || 'https://www.tiktok.com/',
         linkHp: fileLinkHp(p),
-        klipId: p.klipId || ''
+        klipId: p.klipId || '',
+        month: p.month || '',
       });
     });
 
     return Object.values(map)
       .filter(item => !onlyWinning || item.isWinning || item.starredFilesCount > 0)
       .sort((a, b) => b[sortBy] - a[sortBy]);
-  }, [visibleRawList, visibleKlipList, visibleUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy]);
+  }, [visibleRawList, visibleKlipList, visibleUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy, starMode, starIndex]);
 
   // --- AGREGASI TABEL KANAN: TRACKING HARIAN ---
   const aggregatedDaily = useMemo(() => {
@@ -945,7 +1003,8 @@ export default function App() {
         status: r.status || 'Mentahan',
         owner: normalizePersonName(r.creator) || 'Riset',
         url: r.url || 'https://onedrive.live.com/',
-        linkHp: fileLinkHp(r)
+        linkHp: fileLinkHp(r),
+        month: r.month || '',
       });
     });
 
@@ -961,7 +1020,8 @@ export default function App() {
         status: 'Selesai Edit',
         owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
         url: k.url || 'https://onedrive.live.com/',
-        linkHp: fileLinkHp(k)
+        linkHp: fileLinkHp(k),
+        month: k.month || '',
       });
     });
 
@@ -979,7 +1039,8 @@ export default function App() {
         owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
         url: p.url || 'https://www.tiktok.com/',
         linkHp: fileLinkHp(p),
-        klipId: p.klipId || ''
+        klipId: p.klipId || '',
+        month: p.month || '',
       });
     });
 
@@ -994,14 +1055,19 @@ export default function App() {
   const pipelineTotal = filteredRawList.length + filteredKlipList.length + filteredUploadList.length;
   const pipelineShown = totalMentahanRekap + totalFinalRekap + totalUploadRekap;
 
-  const openRealFilesModal = (title, kategori, filesArray) => {
+  const openRealFilesModal = (title, kategori, filesArray, reportMonth = rekapBulan) => {
     if (!filesArray || filesArray.length === 0) return;
+    const locked = toYearMonth(reportMonth);
+    const label = locked ? formatYearMonth(locked) : '';
     setOnlyWinningInModal(false);
     setFileListQuery('');
     setDrillDownModal({
       title: `${kategori} — ${title}`,
-      subtitle: `Klik bintang ⭐ pada baris file di bawah untuk menandai file video bagus (tersimpan ke Data_Winning_Files)`,
-      items: filesArray
+      subtitle: label
+        ? `Bintang masuk ke bulan laporan ${label}, bukan tanggal klik. Bulan lain tidak ikut terhapus.`
+        : 'Filter Semua: bintang masuk ke bulan masing-masing file, bukan tanggal klik.',
+      items: filesArray,
+      reportMonth: locked,
     });
   };
 
@@ -1445,17 +1511,32 @@ export default function App() {
   };
 
   const fypBaseData = data.filter(matchesFypBaseFilters);
-  const isFypRowStarred = (item) => {
+  const fypStarInfo = (item) => {
     const fileKey = getFypFileKey(item);
-    return !!fileKey && !!winningFilesMap[fileKey]?.isWinning;
+    const bulan = starMonthForSelection(filterBulan, item._month);
+    return { fileKey, bulan, ...lookupFileStar(fileKey, bulan) };
+  };
+  const isFypRowStarred = (item) => {
+    const info = fypStarInfo(item);
+    return !!info.fileKey && info.isWinning;
   };
   const starredFypCount = fypBaseData.filter(isFypRowStarred).length;
   const fypScoped = onlyWinningFyp ? fypBaseData.filter(isFypRowStarred) : fypBaseData;
-  const filteredData = filterBySearch(fypScoped, debouncedFypQuery, (item) => fypRowSearchFields(item, [
-    accountLookup[String(item.Nama_Akun || item.Id_Akun || '').toUpperCase()],
-    getBulanFormat(item.Tanggal_Upload),
-    winningFilesMap[getFypFileKey(item)]?.catatan,
-  ]));
+  const filteredData = filterBySearch(fypScoped, debouncedFypQuery, (item) => {
+    const info = fypStarInfo(item);
+    return fypRowSearchFields(item, [
+      accountLookup[String(item.Nama_Akun || item.Id_Akun || '').toUpperCase()],
+      getBulanFormat(item.Tanggal_Upload),
+      info.catatan,
+      formatStarBadge(info.months),
+    ]);
+  });
+  const fypBaseMonth = toYearMonth(filterBulan);
+  const fypCompareOptions = compareMonthOptions(fypBaseMonth, starRows, listBulan);
+  const fypCompareResult = compareStarMonths(starRows, fypBaseMonth, fypCompareBulan, 'fyp');
+  const rekapBaseMonth = toYearMonth(rekapBulan);
+  const rekapCompareOptions = compareMonthOptions(rekapBaseMonth, starRows, availableMonthsRekap);
+  const rekapCompareResult = compareStarMonths(starRows, rekapBaseMonth, rekapCompareBulan, 'pipeline');
 
   const statTotalVideo = filteredData.length;
   const statTotalView = filteredData.reduce((sum, item) => sum + (parseInt(String(item.View).replace(/[^0-9]/g, '')) || 0), 0);
@@ -1472,8 +1553,12 @@ export default function App() {
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
   const modalItems = drillDownModal?.items || [];
-  const modalAfterStar = modalItems.filter((file) => !onlyWinningInModal || winningFilesMap[file.fileKey]?.isWinning);
-  const modalVisible = filterBySearch(modalAfterStar, debouncedFileListQuery, fileListSearchFields);
+  const modalMonthFor = (file) => drillDownModal?.reportMonth || toYearMonth(file?.month) || '';
+  const modalAfterStar = modalItems.filter((file) => !onlyWinningInModal || lookupFileStar(file.fileKey, modalMonthFor(file)).isWinning);
+  const modalVisible = filterBySearch(modalAfterStar, debouncedFileListQuery, (file) => (
+    fileListSearchFields(file).concat(formatStarBadge(lookupFileStar(file.fileKey, modalMonthFor(file)).months))
+  ));
+  const modalStarredCount = modalItems.filter((file) => lookupFileStar(file.fileKey, modalMonthFor(file)).isWinning).length;
 
   return (
     <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative print:bg-white print:pb-0">
@@ -1526,14 +1611,22 @@ export default function App() {
                     : 'Tidak ada file yang cocok dengan pencarian.'}
                 </p>
               ) : modalVisible.map((file, idx) => {
-                  const fileWinInfo = winningFilesMap[file.fileKey] || { isWinning: false, catatan: '' };
+                  const bulan = modalMonthFor(file);
+                  const fileWinInfo = lookupFileStar(file.fileKey, bulan);
+                  const starLocked = starMode === 'history' && !bulan;
                   return (
                     <div key={file.fileKey || idx} className={`py-3.5 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg transition-colors ${fileWinInfo.isWinning ? 'bg-amber-50/50 hover:bg-amber-50/80' : 'hover:bg-white'}`}>
                       <div className="flex items-start gap-3 flex-1 min-w-0">
                         <button
-                          onClick={() => saveFileWinningToSheet(file, !fileWinInfo.isWinning, fileWinInfo.catatan)}
-                          title="Tandai file video ini sebagai Bagus / Winning"
-                          className="mt-1 focus:outline-none shrink-0"
+                          type="button"
+                          disabled={starLocked}
+                          onClick={() => {
+                            if (starLocked) return;
+                            saveFileWinningToSheet(file, !fileWinInfo.isWinning, fileWinInfo.catatan, bulan);
+                          }}
+                          title={starLocked ? 'Pilih bulan laporan dulu' : 'Tandai file ini untuk bulan laporan yang sedang dipilih'}
+                          aria-pressed={!!fileWinInfo.isWinning}
+                          className={`mt-1 focus:outline-none shrink-0 ${starLocked ? 'cursor-not-allowed opacity-40' : ''}`}
                         >
                           <Star className={`w-5 h-5 transition-transform active:scale-125 ${fileWinInfo.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
                         </button>
@@ -1545,6 +1638,7 @@ export default function App() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <p className="font-bold text-gray-900 text-sm break-all">{file.name}</p>
+                            <StarHistoryBadge months={fileWinInfo.months} />
                             {savingFileKey === file.fileKey && (
                               <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                                 <Check className="w-3 h-3" /> Tersimpan
@@ -1563,12 +1657,13 @@ export default function App() {
                           </div>
 
                           <input
+                            key={`${file.fileKey || idx}-${bulan}`}
                             type="text"
                             defaultValue={fileWinInfo.catatan || ''}
-                            placeholder="Catatan file ini (Enter u/ simpan ke Data_Winning_Files)..."
+                            placeholder={starMode === 'history' ? 'Catatan bulan laporan ini (Enter untuk simpan)...' : 'Catatan file ini (Enter u/ simpan ke Data_Winning_Files)...'}
                             onBlur={(e) => {
                               if (e.target.value !== (fileWinInfo.catatan || '')) {
-                                saveFileWinningToSheet(file, fileWinInfo.isWinning, e.target.value);
+                                saveFileWinningToSheet(file, fileWinInfo.isWinning, e.target.value, bulan);
                               }
                             }}
                             onKeyDown={(e) => {
@@ -1588,7 +1683,7 @@ export default function App() {
 
             <div className="px-6 py-3 bg-white border-t border-gray-200 flex justify-between items-center shrink-0">
               <span className="text-xs text-gray-500 font-semibold">
-                ⭐ {drillDownModal.items.filter(f => winningFilesMap[f.fileKey]?.isWinning).length} file ditandai bagus pada daftar ini
+                ⭐ {modalStarredCount} file ditandai bagus pada daftar ini
               </span>
               <button onClick={() => setDrillDownModal(null)} className="px-5 py-2 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
                 Tutup Daftar File
@@ -1935,6 +2030,16 @@ export default function App() {
             </div>
           </div>
 
+          {starMode === 'history' && (
+            <StarMonthCompare
+              baseMonth={rekapBaseMonth}
+              compareMonth={rekapCompareBulan}
+              onCompareMonth={setRekapCompareBulan}
+              options={rekapCompareOptions}
+              result={rekapCompareResult}
+            />
+          )}
+
           {/* ========================================================================= */}
           {/* 2. KOTAK POWER BULANAN (PER 3 BULAN + BISA DI-HIDE AGAR HEMAT LAYAR)      */}
           {/* ========================================================================= */}
@@ -2082,7 +2187,7 @@ export default function App() {
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openRealFilesModal(m.title, 'Mentahan (Raw_Asset)', m.rawFiles);
+                                openRealFilesModal(m.title, 'Mentahan (Raw_Asset)', m.rawFiles, m.month);
                               }}
                               className="bg-white p-2 rounded-lg border border-blue-100 hover:border-blue-400 transition-colors"
                               title="Klik untuk membuka file Mentahan bulan ini"
@@ -2099,7 +2204,7 @@ export default function App() {
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openRealFilesModal(m.title, 'Produksi (Klip_Vidio)', m.klipFiles);
+                                openRealFilesModal(m.title, 'Produksi (Klip_Vidio)', m.klipFiles, m.month);
                               }}
                               className="bg-white p-2 rounded-lg border border-amber-100 hover:border-amber-400 transition-colors"
                               title="Klik untuk membuka file Video Final bulan ini"
@@ -2116,7 +2221,7 @@ export default function App() {
                             <div
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openRealFilesModal(m.title, 'Publish (Tayang)', m.uploadFiles);
+                                openRealFilesModal(m.title, 'Publish (Tayang)', m.uploadFiles, m.month);
                               }}
                               className="bg-white p-2 rounded-lg border border-emerald-100 hover:border-emerald-400 transition-colors"
                               title="Klik untuk membuka video Publish bulan ini"
@@ -2479,6 +2584,16 @@ export default function App() {
             </span>
           </div>
 
+          {starMode === 'history' && (
+            <StarMonthCompare
+              baseMonth={fypBaseMonth}
+              compareMonth={fypCompareBulan}
+              onCompareMonth={setFypCompareBulan}
+              options={fypCompareOptions}
+              result={fypCompareResult}
+            />
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-8">
             <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-gray-200 flex items-center gap-5">
               <div className="p-4 bg-blue-50 text-blue-600 rounded-xl"><Video className="w-7 h-7" /></div>
@@ -2527,10 +2642,14 @@ export default function App() {
                       const rawAkun = row.Nama_Akun || row.Id_Akun || '';
                       const fileKey = getFypFileKey(row);
                       const fileObj = getFypFileObj(row);
-                      const fileWinInfo = (fileKey && winningFilesMap[fileKey]) || { isWinning: false, catatan: '' };
+                      const starInfo = fypStarInfo(row);
+                      const fileWinInfo = fileKey ? starInfo : { isWinning: false, catatan: '', months: [] };
+                      const bulan = starInfo.bulan;
+                      const starLocked = !fileKey || (starMode === 'history' && !bulan);
+                      const draftKey = `${bulan}::${fileKey}`;
                       const savedCatatan = fileWinInfo.catatan || '';
-                      const catatanValue = fileKey && Object.prototype.hasOwnProperty.call(fypCatatanDraft, fileKey)
-                        ? fypCatatanDraft[fileKey]
+                      const catatanValue = fileKey && Object.prototype.hasOwnProperty.call(fypCatatanDraft, draftKey)
+                        ? fypCatatanDraft[draftKey]
                         : savedCatatan;
 
                       return (
@@ -2539,21 +2658,26 @@ export default function App() {
                             <div className="flex items-start gap-2">
                               <button
                                 type="button"
-                                disabled={!fileKey}
-                                title={fileKey ? 'Tandai video ini sebagai Bagus / Winning' : 'Tidak bisa ditandai: Id klip dan link postingan kosong'}
+                                disabled={starLocked}
+                                title={!fileKey
+                                  ? 'Tidak bisa ditandai: Id klip dan link postingan kosong'
+                                  : starLocked
+                                    ? 'Pilih bulan laporan dulu'
+                                    : 'Tandai video ini untuk bulan laporan yang sedang dipilih'}
                                 aria-pressed={!!fileWinInfo.isWinning}
                                 onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
-                                  if (!fileKey) return;
-                                  saveFileWinningToSheet(fileObj, !fileWinInfo.isWinning, catatanValue);
+                                  if (starLocked) return;
+                                  saveFileWinningToSheet(fileObj, !fileWinInfo.isWinning, catatanValue, bulan);
                                 }}
-                                className={`mt-0.5 focus:outline-none shrink-0 ${fileKey ? '' : 'cursor-not-allowed opacity-40'}`}
+                                className={`mt-0.5 focus:outline-none shrink-0 ${starLocked ? 'cursor-not-allowed opacity-40' : ''}`}
                               >
                                 <Star className={`w-5 h-5 transition-transform active:scale-125 ${fileWinInfo.isWinning ? 'fill-amber-400 text-amber-400' : 'text-gray-300 hover:text-amber-300'}`} />
                               </button>
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <p className="font-bold text-gray-900 truncate max-w-[200px]">{row.Induk_Barang}</p>
+                                  <StarHistoryBadge months={fileWinInfo.months} />
                                   {fileKey && savingFileKey === fileKey && (
                                     <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-0.5">
                                       <Check className="w-3 h-3" /> Tersimpan
@@ -2612,17 +2736,21 @@ export default function App() {
                                 <input
                                   type="text"
                                   value={catatanValue}
-                                  disabled={!fileKey}
-                                  placeholder={fileKey ? 'Isi catatan evaluasi tim...' : 'Catatan tidak tersedia tanpa Id klip / link'}
+                                  disabled={starLocked}
+                                  placeholder={!fileKey
+                                    ? 'Catatan tidak tersedia tanpa Id klip / link'
+                                    : starMode === 'history'
+                                      ? 'Catatan bulan laporan ini...'
+                                      : 'Isi catatan evaluasi tim...'}
                                   onChange={(e) => {
-                                    if (!fileKey) return;
+                                    if (starLocked) return;
                                     const next = e.target.value;
-                                    setFypCatatanDraft((prev) => ({ ...prev, [fileKey]: next }));
+                                    setFypCatatanDraft((prev) => ({ ...prev, [draftKey]: next }));
                                   }}
                                   onBlur={(e) => {
-                                    if (!fileKey) return;
-                                    if (e.target.value !== (winningFilesMap[fileKey]?.catatan || '')) {
-                                      saveFileWinningToSheet(fileObj, !!winningFilesMap[fileKey]?.isWinning, e.target.value);
+                                    if (starLocked) return;
+                                    if (e.target.value !== savedCatatan) {
+                                      saveFileWinningToSheet(fileObj, fileWinInfo.isWinning, e.target.value, bulan);
                                     }
                                   }}
                                   onKeyDown={(e) => {
