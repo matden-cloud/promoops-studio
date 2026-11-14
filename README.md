@@ -36,6 +36,8 @@ Aksi lain ditolak. `run_update` dapat berjalan sampai 60 detik (`maxDuration` di
 
 Tombol **Buka di HP** di modal Rekap Pipeline memakai `linkHp` pada `rawAssets` dan `klipVideos`. Kalau field itu belum ada, tombolnya tidak ditampilkan dan tombol OneDrive tetap ada. Cara menambah field di Apps Script ada di `apps-script/linkHp-snippet.gs` (tempel, lalu deploy versi baru pada deployment yang sama supaya URL `/exec` tidak berubah).
 
+Bintang file per bulan laporan memakai `starHistory` dari `doGet`. Kalau field itu belum ada, dashboard tetap menandai bintang seperti sebelumnya (satu status per file di `Data_Winning_Files`). Cara menambah tab `Riwayat_Bintang` ada di `apps-script/riwayat-bintang.gs`: tempel, lalu **Deploy → Manage deployments → pensil → Version: New version → Deploy**. Jangan buat deployment Web App baru.
+
 Model default adalah `gemini-3.5-flash-lite`, pengganti resmi `gemini-2.5-flash`. Google menandai `gemini-2.5-flash` deprecated: mulai 1 Desember 2026 permintaan ke model itu dialihkan ke `gemini-3.5-flash-lite`, dan akses model 2.5 dibatasi ke proyek yang sudah pernah memakainya. Nama lain bisa diisi lewat `GEMINI_MODEL`. Untuk `gemini-2.5-flash`, server mematikan thinking (`thinkingBudget` 0) supaya token keluaran tidak habis sebelum jawaban terbentuk. Model Gemini 3 memakai `thinkingLevel` rendah (`MINIMAL` pada Flash-Lite, `LOW` pada Flash lain) dan tidak menerima `temperature`. Batas `maxOutputTokens` adalah 2048. Jika Google menolak, respons memuat `detail` berisi status HTTP, `error.status`, dan `error.message` dari Google; kunci API disensor. Kunci dikirim dari server lewat header, tidak lewat query string.
 
 ## Langkah manual pemilik setelah merge
