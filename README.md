@@ -8,8 +8,8 @@ URL Web App Apps Script dan kunci Gemini tidak lagi ditulis di kode atau di Java
 
 1. Pasang dependensi: `npm install`
 2. Salin `.env.example` menjadi `.env`, lalu isi ketiga variabel wajib. `GEMINI_MODEL` boleh dikosongkan. File `.env` tidak boleh di-commit.
-3. Jalankan `npm run dev`. Vite ikut melayani `/api/apps-script` dan `/api/gemini` dengan nilai dari `.env`.
-4. `npm run build` membuat bundle produksi. `npm run preview` juga melayani kedua endpoint itu. `npm test` menjalankan uji perantara dengan server tiruan.
+3. Jalankan `npm run dev`. Vite ikut melayani `/api/apps-script`, `/api/gemini`, dan `/api/tiktok-resolve` dengan nilai dari `.env`.
+4. `npm run build` membuat bundle produksi. `npm run preview` juga melayani endpoint itu. `npm test` menjalankan uji perantara dengan server tiruan.
 
 Fungsi `/api` membaca variabel lingkungan proses Node. Jangan memberi awalan yang membuat Vite menyisipkan nilainya ke bundle browser.
 
@@ -31,6 +31,10 @@ Perantara Apps Script hanya meneruskan aksi yang dipakai dashboard:
 - POST `save_winning_web`, `save_winning_file`, `save_violation`, `update_violation`
 
 Aksi lain ditolak. `run_update` dapat berjalan sampai 60 detik (`maxDuration` di `vercel.json`). Naikkan batas itu bila paket Vercel mengizinkan dan bot membutuhkan waktu lebih lama.
+
+`GET /api/tiktok-resolve?url=` mengubah tautan TikTok menjadi ID video untuk pemutar di dalam dashboard. Tautan yang sudah memuat `/video/<id>` dibaca tanpa meminta ulang ke TikTok. Tautan pendek `vt.tiktok.com` dan `vm.tiktok.com` diikuti pengalihan HTTPS-nya (batas waktu dan cache memori singkat). Host yang diizinkan hanya `tiktok.com`, `www.tiktok.com`, `m.tiktok.com`, `vt.tiktok.com`, dan `vm.tiktok.com`. Port selain 443, kredensial di URL, dan pengalihan ke host lain ditolak.
+
+Tombol **Buka di HP** di modal Rekap Pipeline memakai `linkHp` pada `rawAssets` dan `klipVideos`. Kalau field itu belum ada, tombolnya tidak ditampilkan dan tombol OneDrive tetap ada. Cara menambah field di Apps Script ada di `apps-script/linkHp-snippet.gs` (tempel, lalu deploy versi baru pada deployment yang sama supaya URL `/exec` tidak berubah).
 
 Model default adalah `gemini-3.5-flash-lite`, pengganti resmi `gemini-2.5-flash`. Google menandai `gemini-2.5-flash` deprecated: mulai 1 Desember 2026 permintaan ke model itu dialihkan ke `gemini-3.5-flash-lite`, dan akses model 2.5 dibatasi ke proyek yang sudah pernah memakainya. Nama lain bisa diisi lewat `GEMINI_MODEL`. Untuk `gemini-2.5-flash`, server mematikan thinking (`thinkingBudget` 0) supaya token keluaran tidak habis sebelum jawaban terbentuk. Model Gemini 3 memakai `thinkingLevel` rendah (`MINIMAL` pada Flash-Lite, `LOW` pada Flash lain) dan tidak menerima `temperature`. Batas `maxOutputTokens` adalah 2048. Jika Google menolak, respons memuat `detail` berisi status HTTP, `error.status`, dan `error.message` dari Google; kunci API disensor. Kunci dikirim dari server lewat header, tidak lewat query string.
 

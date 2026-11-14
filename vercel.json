@@ -5,6 +5,9 @@
     },
     "api/gemini.js": {
       "maxDuration": 30
+    },
+    "api/tiktok-resolve.js": {
+      "maxDuration": 15
     }
   }
 }

@@ -4,8 +4,10 @@ import {
   LayoutDashboard, BarChart2,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
-  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown
+  ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
+  Play, Smartphone
 } from 'lucide-react';
+import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
 
 const DEFAULT_VIOLATION_TYPES = [
   "Produk Berbahaya / Tajam",
@@ -131,6 +133,135 @@ function geminiFailureMessage(result) {
   return message || detail;
 }
 
+const TIKTOK_RESOLVE_ENDPOINT = '/api/tiktok-resolve';
+
+function safeHttpUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') return '';
+    if (url.username || url.password) return '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
+function fileLinkHp(row) {
+  return safeHttpUrl(row?.linkHp || row?.Link_HP || row?.link_hp || '');
+}
+
+function FileLinkActions({ file, onPlay }) {
+  const pageUrl = safeHttpUrl(file?.url);
+  const linkHp = safeHttpUrl(file?.linkHp);
+  const tiktok = inspectTikTokUrl(pageUrl).ok;
+  const playable = canPlayTikTokUrl(pageUrl);
+  if (!pageUrl && !linkHp) return null;
+
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+      {playable && (
+        <button
+          type="button"
+          onClick={() => onPlay(file.name, pageUrl)}
+          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+        >
+          <Play className="w-3.5 h-3.5" fill="currentColor" /> Play
+        </button>
+      )}
+      {pageUrl && !tiktok && (
+        <a
+          href={pageUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+        >
+          OneDrive <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      )}
+      {pageUrl && tiktok && (
+        <a
+          href={pageUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white hover:bg-gray-50 text-gray-800 text-xs font-bold rounded-lg border border-gray-300 shadow-sm transition-colors"
+        >
+          Buka di TikTok <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      )}
+      {linkHp && (
+        <a
+          href={linkHp}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
+        >
+          <Smartphone className="w-3.5 h-3.5" /> Buka di HP
+        </a>
+      )}
+    </div>
+  );
+}
+
+function TikTokPlayerModal({ player, onClose }) {
+  if (!player) return null;
+  const fallback = safeHttpUrl(player.pageUrl);
+
+  return (
+    <div className="fixed inset-0 bg-gray-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 print:hidden">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[92vh]">
+        <div className="px-5 py-4 bg-gray-900 text-white flex items-start justify-between gap-3 shrink-0">
+          <div className="min-w-0">
+            <h3 className="font-bold text-base leading-tight">Putar di Dashboard</h3>
+            <p className="text-xs text-gray-300 mt-1 break-words">{player.title || 'Video TikTok'}</p>
+          </div>
+          <button type="button" onClick={onClose} className="text-gray-300 hover:text-white bg-gray-800 p-2 rounded-full shrink-0" aria-label="Tutup pemutar">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="bg-black flex-1 min-h-[240px] flex items-center justify-center">
+          {player.status === 'loading' && (
+            <p className="text-sm font-semibold text-white px-6 text-center">Membaca tautan TikTok...</p>
+          )}
+          {player.status === 'error' && (
+            <div className="px-6 py-8 text-center">
+              <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-white leading-relaxed">{player.message}</p>
+            </div>
+          )}
+          {player.status === 'ready' && player.embedUrl && (
+            <iframe
+              src={player.embedUrl}
+              title={player.title ? `Pemutar TikTok: ${player.title}` : 'Pemutar TikTok'}
+              className="w-full aspect-[9/16] max-h-[70vh] bg-black"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            />
+          )}
+        </div>
+
+        <div className="px-5 py-4 bg-white border-t border-gray-200 flex flex-col sm:flex-row gap-2 shrink-0">
+          {fallback && (
+            <a
+              href={fallback}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-800 text-sm font-bold rounded-xl border border-gray-300"
+            >
+              Buka di TikTok <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
+          <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
+            Tutup
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
 
@@ -180,6 +311,7 @@ export default function App() {
 
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
+  const [tiktokPlayer, setTiktokPlayer] = useState(null);
 
   // --- STATE ASISTEN AI PEMBACA WEB & PEMBUAT LAPORAN PPT/PDF ---
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
@@ -453,7 +585,8 @@ export default function App() {
         name: `${r.fileName} (${r.produk})`,
         status: r.status || 'Mentahan',
         owner: `${normalizePersonName(r.creator) || 'Riset'} • ${r.date || ''}`,
-        url: r.url || 'https://onedrive.live.com/'
+        url: r.url || 'https://onedrive.live.com/',
+        linkHp: fileLinkHp(r)
       });
     });
 
@@ -478,7 +611,8 @@ export default function App() {
         name: `${k.fileName} (${k.produk})`,
         status: `Selesai Edit (${k.date || '-'})`,
         owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
-        url: k.url || 'https://onedrive.live.com/'
+        url: k.url || 'https://onedrive.live.com/',
+        linkHp: fileLinkHp(k)
       });
     });
 
@@ -516,7 +650,8 @@ export default function App() {
         name: `${p.fileName} (${p.produk})`,
         status: `${p.status || 'Sukses'} (${p.date || '-'})`,
         owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
-        url: p.url || 'https://www.tiktok.com/'
+        url: p.url || 'https://www.tiktok.com/',
+        linkHp: fileLinkHp(p)
       });
     });
 
@@ -663,7 +798,8 @@ export default function App() {
         name: r.fileName || r.id,
         status: r.status || 'Mentahan',
         owner: `${cleanCreator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
-        url: r.url || 'https://onedrive.live.com/'
+        url: r.url || 'https://onedrive.live.com/',
+        linkHp: fileLinkHp(r)
       });
     });
 
@@ -683,7 +819,8 @@ export default function App() {
         name: k.fileName || k.id,
         status: `Selesai Edit (${k.date || '-'})`,
         owner: `Editor: ${cleanEditor || '-'} • ${accountLookup[(k.akunTarget || '').toUpperCase()] || k.akunTarget || ''}`,
-        url: k.url || 'https://onedrive.live.com/'
+        url: k.url || 'https://onedrive.live.com/',
+        linkHp: fileLinkHp(k)
       });
     });
 
@@ -705,7 +842,8 @@ export default function App() {
         name: `${p.fileName} (${p.produk})`,
         status: `${p.status || 'Sukses'} (${p.date || '-'})`,
         owner: `${cleanUploader || 'Publisher'} • ${fullAkunLabel}`,
-        url: p.url || 'https://www.tiktok.com/'
+        url: p.url || 'https://www.tiktok.com/',
+        linkHp: fileLinkHp(p)
       });
     });
 
@@ -747,7 +885,8 @@ export default function App() {
         name: `${r.fileName} (${r.produk})`,
         status: r.status || 'Mentahan',
         owner: normalizePersonName(r.creator) || 'Riset',
-        url: r.url || 'https://onedrive.live.com/'
+        url: r.url || 'https://onedrive.live.com/',
+        linkHp: fileLinkHp(r)
       });
     });
 
@@ -762,7 +901,8 @@ export default function App() {
         name: `${k.fileName} (${k.produk})`,
         status: 'Selesai Edit',
         owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
-        url: k.url || 'https://onedrive.live.com/'
+        url: k.url || 'https://onedrive.live.com/',
+        linkHp: fileLinkHp(k)
       });
     });
 
@@ -778,7 +918,8 @@ export default function App() {
         name: `${p.fileName} (${p.produk})`,
         status: p.status || 'Sukses',
         owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
-        url: p.url || 'https://www.tiktok.com/'
+        url: p.url || 'https://www.tiktok.com/',
+        linkHp: fileLinkHp(p)
       });
     });
 
@@ -799,6 +940,77 @@ export default function App() {
       subtitle: `Klik bintang ⭐ pada baris file di bawah untuk menandai file video bagus (tersimpan ke Data_Winning_Files)`,
       items: filesArray
     });
+  };
+
+  const openTikTokPlayer = (title, pageUrl) => {
+    const safe = safeHttpUrl(pageUrl);
+    const inspected = inspectTikTokUrl(safe);
+    if (!inspected.ok) {
+      setTiktokPlayer({
+        title: title || 'Video TikTok',
+        pageUrl: safe,
+        status: 'error',
+        message: 'Tautan ini bukan tautan TikTok yang bisa diputar.',
+      });
+      return;
+    }
+    if (inspected.videoId) {
+      setTiktokPlayer({
+        title: title || 'Video TikTok',
+        pageUrl: safe,
+        status: 'ready',
+        videoId: inspected.videoId,
+        embedUrl: buildTikTokEmbedUrl(inspected.videoId),
+      });
+      return;
+    }
+
+    const requestId = createClientId('tt');
+    setTiktokPlayer({
+      title: title || 'Video TikTok',
+      pageUrl: safe,
+      status: 'loading',
+      requestId,
+    });
+
+    const load = async () => {
+      try {
+        const response = await fetch(`${TIKTOK_RESOLVE_ENDPOINT}?url=${encodeURIComponent(safe)}`);
+        let result = null;
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+        setTiktokPlayer((prev) => {
+          if (!prev || prev.requestId !== requestId) return prev;
+          if (!response.ok || !result?.videoId || !result?.embedUrl) {
+            const message = typeof result?.message === 'string' ? result.message.trim() : '';
+            return {
+              ...prev,
+              status: 'error',
+              message: message || 'Gagal membaca tautan TikTok. Buka video langsung di TikTok.',
+            };
+          }
+          return {
+            ...prev,
+            status: 'ready',
+            videoId: result.videoId,
+            embedUrl: result.embedUrl,
+          };
+        });
+      } catch {
+        setTiktokPlayer((prev) => {
+          if (!prev || prev.requestId !== requestId) return prev;
+          return {
+            ...prev,
+            status: 'error',
+            message: 'Gagal menghubungi server untuk membaca tautan TikTok.',
+          };
+        });
+      }
+    };
+    load();
   };
 
   const getViolationStatusStyle = (status) => {
@@ -1273,16 +1485,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      {file.url && (
-                        <a 
-                          href={file.url} 
-                          target="_blank" 
-                          rel="noreferrer" 
-                          className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm transition-colors shrink-0"
-                        >
-                          Buka File <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
+                      <FileLinkActions file={file} onPlay={openTikTokPlayer} />
                     </div>
                   );
                 })}
@@ -1299,6 +1502,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+      <TikTokPlayerModal player={tiktokPlayer} onClose={() => setTiktokPlayer(null)} />
 
       {/* ========================================================================= */}
       {/* MODAL 2: ASISTEN AI PEMBACA WEB & GENERATOR LAPORAN PPT/PDF               */}
@@ -2239,9 +2444,20 @@ export default function App() {
                                   )}
                                 </div>
                                 {row.Link_Postingan ? (
-                                  <a href={row.Link_Postingan} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-1 w-max">
-                                    Buka Video <ExternalLink className="w-3 h-3"/>
-                                  </a>
+                                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                                    {canPlayTikTokUrl(row.Link_Postingan) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => openTikTokPlayer(row.Induk_Barang || 'Video TikTok', row.Link_Postingan)}
+                                        className="inline-flex items-center gap-1 text-xs font-bold text-white bg-gray-900 hover:bg-black px-2 py-1 rounded-md"
+                                      >
+                                        <Play className="w-3 h-3" fill="currentColor" /> Play
+                                      </button>
+                                    )}
+                                    <a href={row.Link_Postingan} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 w-max">
+                                      Buka di TikTok <ExternalLink className="w-3 h-3"/>
+                                    </a>
+                                  </div>
                                 ) : null}
                               </div>
                             </div>
