@@ -7,6 +7,7 @@ import {
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
   Play, Smartphone
 } from 'lucide-react';
+import { originalUrlForFypRow, originalUrlForPublish } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
 
 const DEFAULT_VIOLATION_TYPES = [
@@ -164,7 +165,10 @@ function FileLinkActions({ file, onPlay }) {
       {playable && (
         <button
           type="button"
-          onClick={() => onPlay(file.name, pageUrl)}
+          onClick={() => onPlay(file.name, pageUrl, {
+            showCartNote: file?.kategori === 'Video Terupload (Publish)',
+            klipId: file?.klipId || '',
+          })}
           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
         >
           <Play className="w-3.5 h-3.5" fill="currentColor" /> Play
@@ -207,10 +211,11 @@ function FileLinkActions({ file, onPlay }) {
 function TikTokPlayerModal({ player, onClose }) {
   if (!player) return null;
   const fallback = safeHttpUrl(player.pageUrl);
+  const originalUrl = player.showCartNote ? safeHttpUrl(player.originalUrl) : '';
 
   return (
     <div className="fixed inset-0 bg-gray-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 print:hidden">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-y-auto flex flex-col max-h-[92vh]">
         <div className="px-5 py-4 bg-gray-900 text-white flex items-start justify-between gap-3 shrink-0">
           <div className="min-w-0">
             <h3 className="font-bold text-base leading-tight">Putar di Dashboard</h3>
@@ -221,7 +226,7 @@ function TikTokPlayerModal({ player, onClose }) {
           </button>
         </div>
 
-        <div className="bg-black flex-1 min-h-[240px] flex items-center justify-center">
+        <div className="bg-black min-h-[240px] overflow-hidden flex items-center justify-center">
           {player.status === 'loading' && (
             <p className="text-sm font-semibold text-white px-6 text-center">Membaca tautan TikTok...</p>
           )}
@@ -235,25 +240,41 @@ function TikTokPlayerModal({ player, onClose }) {
             <iframe
               src={player.embedUrl}
               title={player.title ? `Pemutar TikTok: ${player.title}` : 'Pemutar TikTok'}
-              className="w-full aspect-[9/16] max-h-[70vh] bg-black"
+              className={`w-full aspect-[9/16] bg-black ${player.showCartNote ? 'max-h-[min(70vh,calc(92vh-22rem))]' : 'max-h-[70vh]'}`}
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
               allowFullScreen
             />
           )}
         </div>
 
-        <div className="px-5 py-4 bg-white border-t border-gray-200 flex flex-col sm:flex-row gap-2 shrink-0">
+        {player.showCartNote && (
+          <p className="px-5 pt-3 text-xs text-gray-500 leading-relaxed">
+            Video berkeranjang kuning hanya bisa diputar di aplikasi TikTok HP. Kalau layar hitam, pakai tombol di bawah.
+          </p>
+        )}
+
+        <div className="px-5 py-4 bg-white border-t border-gray-200 flex flex-col gap-2 shrink-0">
           {fallback && (
             <a
               href={fallback}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex flex-1 items-center justify-center gap-1.5 px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-800 text-sm font-bold rounded-xl border border-gray-300"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-800 text-sm font-bold rounded-xl border border-gray-300"
             >
               Buka di TikTok <ExternalLink className="w-4 h-4" />
             </a>
           )}
-          <button type="button" onClick={onClose} className="flex-1 px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
+          {originalUrl && (
+            <a
+              href={originalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
+            >
+              Putar file asli (OneDrive) <ExternalLink className="w-4 h-4" />
+            </a>
+          )}
+          <button type="button" onClick={onClose} className="px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
             Tutup
           </button>
         </div>
@@ -625,7 +646,8 @@ export default function App() {
       akun: u.Id_Akun || '',
       uploader: normalizePersonName(u.Nama_Akun || u.Id_Akun || 'Publisher'),
       produk: String(u.Induk_Barang || 'Tanpa Produk').trim(),
-      status: u.Video_FYP || 'Sukses'
+      status: u.Video_FYP || 'Sukses',
+      klipId: u.Id_Klip || ''
     }));
 
     sourcePub.forEach((p, idx) => {
@@ -651,7 +673,8 @@ export default function App() {
         status: `${p.status || 'Sukses'} (${p.date || '-'})`,
         owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
         url: p.url || 'https://www.tiktok.com/',
-        linkHp: fileLinkHp(p)
+        linkHp: fileLinkHp(p),
+        klipId: p.klipId || ''
       });
     });
 
@@ -739,7 +762,8 @@ export default function App() {
       akun: u.Id_Akun || '',
       uploader: normalizePersonName(u.Nama_Akun || u.Id_Akun || 'Publisher'),
       produk: String(u.Induk_Barang || 'Tanpa Produk').trim(),
-      status: u.Video_FYP || 'Sukses'
+      status: u.Video_FYP || 'Sukses',
+      klipId: u.Id_Klip || ''
     }));
 
     return sourceList.filter(p => {
@@ -843,7 +867,8 @@ export default function App() {
         status: `${p.status || 'Sukses'} (${p.date || '-'})`,
         owner: `${cleanUploader || 'Publisher'} • ${fullAkunLabel}`,
         url: p.url || 'https://www.tiktok.com/',
-        linkHp: fileLinkHp(p)
+        linkHp: fileLinkHp(p),
+        klipId: p.klipId || ''
       });
     });
 
@@ -919,7 +944,8 @@ export default function App() {
         status: p.status || 'Sukses',
         owner: `${normalizePersonName(p.uploader) || 'Publisher'} (${fullAkunLabel})`,
         url: p.url || 'https://www.tiktok.com/',
-        linkHp: fileLinkHp(p)
+        linkHp: fileLinkHp(p),
+        klipId: p.klipId || ''
       });
     });
 
@@ -942,13 +968,24 @@ export default function App() {
     });
   };
 
-  const openTikTokPlayer = (title, pageUrl) => {
+  const openTikTokPlayer = (title, pageUrl, options = {}) => {
     const safe = safeHttpUrl(pageUrl);
+    const showCartNote = !!options.showCartNote;
+    const originalUrl = showCartNote
+      ? (options.fypRow
+        ? originalUrlForFypRow(options.fypRow, publishVideos, klipVideos)
+        : originalUrlForPublish({ klipId: options.klipId }, klipVideos))
+      : '';
+    const playerBase = {
+      title: title || 'Video TikTok',
+      pageUrl: safe,
+      showCartNote,
+      originalUrl,
+    };
     const inspected = inspectTikTokUrl(safe);
     if (!inspected.ok) {
       setTiktokPlayer({
-        title: title || 'Video TikTok',
-        pageUrl: safe,
+        ...playerBase,
         status: 'error',
         message: 'Tautan ini bukan tautan TikTok yang bisa diputar.',
       });
@@ -956,8 +993,7 @@ export default function App() {
     }
     if (inspected.videoId) {
       setTiktokPlayer({
-        title: title || 'Video TikTok',
-        pageUrl: safe,
+        ...playerBase,
         status: 'ready',
         videoId: inspected.videoId,
         embedUrl: buildTikTokEmbedUrl(inspected.videoId),
@@ -967,8 +1003,7 @@ export default function App() {
 
     const requestId = createClientId('tt');
     setTiktokPlayer({
-      title: title || 'Video TikTok',
-      pageUrl: safe,
+      ...playerBase,
       status: 'loading',
       requestId,
     });
@@ -2448,7 +2483,10 @@ export default function App() {
                                     {canPlayTikTokUrl(row.Link_Postingan) && (
                                       <button
                                         type="button"
-                                        onClick={() => openTikTokPlayer(row.Induk_Barang || 'Video TikTok', row.Link_Postingan)}
+                                        onClick={() => openTikTokPlayer(row.Induk_Barang || 'Video TikTok', row.Link_Postingan, {
+                                          showCartNote: true,
+                                          fypRow: row,
+                                        })}
                                         className="inline-flex items-center gap-1 text-xs font-bold text-white bg-gray-900 hover:bg-black px-2 py-1 rounded-md"
                                       >
                                         <Play className="w-3 h-3" fill="currentColor" /> Play
