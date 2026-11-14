@@ -698,6 +698,14 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
       });
       assert.equal(ai.status, 503);
       assert.equal((await ai.json()).error, 'missing_api_key');
+
+      const directVideo = 'https://www.tiktok.com/@/video/7106667752018955566';
+      const resolved = await fetch(`${base}/api/tiktok-resolve?url=${encodeURIComponent(directVideo)}`);
+      assert.equal(resolved.status, 200);
+      assert.equal((await resolved.json()).videoId, '7106667752018955566');
+
+      const blockedLink = await fetch(`${base}/api/tiktok-resolve?url=${encodeURIComponent('http://127.0.0.1/secret')}`);
+      assert.equal(blockedLink.status, 400);
     } finally {
       await stop();
       await upstream.close();
