@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
-  LayoutDashboard, BarChart2,
+  LayoutDashboard, BarChart2, Bot,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
@@ -1916,6 +1916,9 @@ export default function App() {
           <button onClick={() => setActiveMenu('pelanggaran')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pelanggaran' ? 'bg-red-50 text-red-700 shadow-sm border border-red-200' : 'text-gray-500 hover:text-red-600'}`}>
             <ShieldAlert className="w-4 h-4" /> Pelanggaran ({violations.length})
           </button>
+          <button onClick={() => setActiveMenu('sinkron')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'sinkron' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+            <Bot className="w-4 h-4" /> Sinkron Bot
+          </button>
         </div>
 
         <div className="flex items-center justify-center gap-2 w-full lg:w-auto">
@@ -1963,8 +1966,6 @@ export default function App() {
               </button>
             </div>
           </div>
-
-          <OneDriveSync onSynced={fetchData} />
 
           <div className="mb-6 print:hidden">
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -3064,6 +3065,19 @@ export default function App() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* HALAMAN 4: SINKRON ONEDRIVE KE FILE_ASSET                                 */}
+      {/* ========================================================================= */}
+      {activeMenu === 'sinkron' && (
+        <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-gray-900">Sinkron Bot</h2>
+            <p className="text-gray-500 mt-1">Hubungkan OneDrive, lalu sinkronkan folder Video Final dan Mentahan ke FILE_ASSET.</p>
+          </div>
+          <OneDriveSync onSynced={fetchData} />
         </div>
       )}
 

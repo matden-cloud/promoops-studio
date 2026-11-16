@@ -13,10 +13,13 @@ import {
   classifyFile,
   isAllowedChildrenUrl,
   isAllowedGraphRead,
+  normalizeStats,
   oneDrivePathFolder,
   planDriveItem,
+  pushSyncDetail,
   rootGraphUrl,
   safeVerificationUri,
+  SYNC_DETAIL_LIMIT,
 } from './onedrive-plan.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -315,6 +318,30 @@ describe('rencana file OneDrive', () => {
     assert.equal(insert.row.Tanggal_File, '2024-05-01');
     assert.equal(insert.share, true);
   });
+
+  test('daftar detail dibatasi dan tidak dibawa dari stats permintaan', () => {
+    const list = [];
+    for (let index = 0; index < SYNC_DETAIL_LIMIT + 5; index += 1) {
+      pushSyncDetail(list, { nama: `file-${index}.mp4`, path: 'OneDrive/A' });
+    }
+    assert.equal(list.length, SYNC_DETAIL_LIMIT);
+    assert.equal(list[0].nama, 'file-0.mp4');
+    assert.equal(list[SYNC_DETAIL_LIMIT - 1].nama, `file-${SYNC_DETAIL_LIMIT - 1}.mp4`);
+
+    const stats = normalizeStats({
+      baru: 9,
+      diperbarui: 4,
+      dilewati: 1,
+      kembar: ['sama.mp4'],
+      daftarBaru: [{ nama: 'racun.mp4', path: 'OneDrive/racun' }],
+      daftarDiubah: [{ namaLama: 'a', pathLama: 'b', namaBaru: 'c', pathBaru: 'd' }],
+    });
+    assert.equal(stats.baru, 9);
+    assert.equal(stats.diperbarui, 4);
+    assert.deepEqual(stats.daftarBaru, []);
+    assert.deepEqual(stats.daftarDiubah, []);
+    assert.deepEqual(stats.kembar, ['sama.mp4']);
+  });
 });
 
 describe('sinkron OneDrive', () => {
@@ -347,6 +374,17 @@ describe('sinkron OneDrive', () => {
     assert.equal(body.stats.diperbarui, 1);
     assert.equal(body.stats.dilewati, 0);
     assert.deepEqual(body.stats.kembar, ['Iklan.mp4']);
+    assert.deepEqual(body.stats.daftarBaru, [
+      { nama: 'iklan.mp4', path: `OneDrive/${FINAL}` },
+      { nama: 'catatan.pdf', path: `OneDrive/${FINAL}` },
+      { nama: 'Iklan.mp4', path: `OneDrive/${FINAL}` },
+    ]);
+    assert.deepEqual(body.stats.daftarDiubah, [{
+      namaLama: 'lama.mp4',
+      pathLama: `OneDrive/${FINAL}`,
+      namaBaru: 'nama-baru.mp4',
+      pathBaru: `OneDrive/${FINAL}`,
+    }]);
     assert.equal(world.rows.length, 4);
     assert.equal(world.rows[0].Nama_File, 'nama-baru.mp4');
     assert.equal(world.rows[0].Status_File, 'Sudah Dipakai');
@@ -396,11 +434,45 @@ describe('sinkron OneDrive', () => {
     assert.equal(body.stats.dilewati, 1);
     assert.equal(body.stats.baru, 0);
     assert.equal(body.stats.diperbarui, 0);
+    assert.deepEqual(body.stats.daftarBaru, []);
+    assert.deepEqual(body.stats.daftarDiubah, []);
     assert.equal(world.upserts.length, 0);
     assert.equal(world.creates.length, 0);
     assert.equal(world.rows[0].Status_File, 'Sudah Dipakai');
     assert.equal(world.rows[0].Catatan, 'tetap');
     assert.equal(world.rows.length, 1);
+  });
+
+  test('pindah folder memakai path lama dari byId dan tidak menambah kolom tulis', async () => {
+    const { world, requestImpl } = makeWorld({
+      rows: [{
+        Id_File: 'FILE!pindah',
+        Nama_File: 'sama.mp4',
+        Path_Folder: 'OneDrive/lama',
+        Status_File: 'Sudah Dipakai',
+        Catatan: 'tetap',
+      }],
+      files: [driveItem({
+        id: 'FILE!pindah',
+        name: 'sama.mp4',
+        parentReference: { path: `/drive/root:/${FINAL}/Sub` },
+      })],
+    });
+    const response = await handleOneDriveSyncRequest(syncRequest('final'), { env: env(), requestImpl });
+    const body = await response.json();
+    assert.equal(body.stats.baru, 0);
+    assert.equal(body.stats.diperbarui, 1);
+    assert.deepEqual(body.stats.daftarBaru, []);
+    assert.deepEqual(body.stats.daftarDiubah, [{
+      namaLama: 'sama.mp4',
+      pathLama: 'OneDrive/lama',
+      namaBaru: 'sama.mp4',
+      pathBaru: `OneDrive/${FINAL}/Sub`,
+    }]);
+    assert.equal(world.rows[0].Path_Folder, `OneDrive/${FINAL}/Sub`);
+    assert.equal(world.rows[0].Status_File, 'Sudah Dipakai');
+    assert.equal(world.rows[0].Catatan, 'tetap');
+    assert.deepEqual(Object.keys(world.upserts[0].updates[0]).sort(), ['idFile', 'linkFolder', 'namaFile', 'pathFolder']);
   });
 
   test('subfolder, halaman berikutnya, dan createLink yang gagal', async () => {
@@ -455,13 +527,25 @@ describe('sinkron OneDrive', () => {
     let cursor = null;
     let stats = null;
     let done = false;
+    const namaBaru = [];
     for (let guard = 0; guard < 8 && !done; guard += 1) {
+      const outgoing = stats
+        ? {
+          ...stats,
+          daftarBaru: [{ nama: 'racun.mp4', path: 'OneDrive/racun' }],
+          daftarDiubah: [{ namaLama: 'racun', pathLama: 'a', namaBaru: 'b', pathBaru: 'c' }],
+        }
+        : null;
       const response = await handleOneDriveSyncRequest(
-        syncRequest('final', { cursor, stats }),
+        syncRequest('final', { cursor, stats: outgoing }),
         { env: env(), requestImpl, maxItems: 1 },
       );
       const body = await response.json();
       assert.equal(body.status, 'success', JSON.stringify(body));
+      assert.equal(body.stats.daftarBaru.some((item) => item.nama === 'racun.mp4'), false);
+      assert.equal(body.stats.daftarDiubah.some((item) => item.namaLama === 'racun'), false);
+      assert.ok(body.stats.daftarBaru.length <= 1);
+      namaBaru.push(...body.stats.daftarBaru.map((item) => item.nama));
       done = body.done;
       cursor = body.cursor;
       stats = body.stats;
@@ -469,6 +553,7 @@ describe('sinkron OneDrive', () => {
     }
     assert.equal(done, true);
     assert.equal(stats.baru, 2);
+    assert.deepEqual(namaBaru, ['satu.mp4', 'dua.mp3']);
     assert.equal(world.rows.length, 2);
     assert.equal(world.creates.length, 2);
     assert.equal(world.rows.find((row) => row.Id_File === 'FILE!2').Jenis_File, 'Audio');
