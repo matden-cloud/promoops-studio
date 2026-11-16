@@ -578,6 +578,89 @@ describe('masuk OneDrive', () => {
     assertNoSecrets(JSON.stringify(statusBody));
   });
 
+  test('302 echo dibaca dengan GET, bukan POST kedua', async () => {
+    const calls = [];
+    const requestImpl = async (url, options = {}) => {
+      const target = new URL(url);
+      calls.push({ method: options.method || 'GET', href: target.href, body: options.body || '' });
+      if (target.pathname === '/exec') {
+        return {
+          status: 302,
+          headers: { location: 'https://script.googleusercontent.com/macros/echo?user_content_key=sekali' },
+          body: '<html>redirect</html>',
+        };
+      }
+      if ((options.method || 'GET') !== 'GET') {
+        return { status: 405, headers: { allow: 'GET, HEAD' }, body: 'Sorry, unable to open the file at this time.' };
+      }
+      return {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          status: 'success',
+          refreshToken: REFRESH_LAMA,
+          deviceCode: '',
+          deviceExpires: '',
+          pollInterval: '',
+        }),
+      };
+    };
+
+    const response = await handleOneDriveLoginRequest(
+      new Request('http://dashboard.local/api/onedrive-login'),
+      { env: env(), requestImpl },
+    );
+    const body = await response.json();
+    assert.equal(body.connected, true, JSON.stringify(body));
+    const posts = calls.filter((item) => item.method === 'POST');
+    assert.equal(posts.length, 1);
+    assert.equal(new URL(posts[0].href).pathname, '/exec');
+    assert.equal(JSON.parse(posts[0].body).action, 'get_onedrive_token');
+    const echoes = calls.filter((item) => item.href.includes('googleusercontent.com'));
+    assert.equal(echoes.length, 1);
+    assert.equal(echoes[0].method, 'GET');
+    assert.equal(echoes[0].href, 'https://script.googleusercontent.com/macros/echo?user_content_key=sekali');
+    assert.equal(echoes[0].body, '');
+    assertNoSecrets(JSON.stringify(body));
+  });
+
+  test('pesan membedakan balasan bukan JSON dari aksi yang belum ada', async () => {
+    async function loginAgainst(echo) {
+      const requestImpl = async (url, options = {}) => {
+        const target = new URL(url);
+        if (target.pathname === '/exec') {
+          return {
+            status: 302,
+            headers: { location: 'https://script.googleusercontent.com/macros/echo?user_content_key=sekali' },
+            body: '',
+          };
+        }
+        return echo(options.method || 'GET');
+      };
+      const response = await handleOneDriveLoginRequest(
+        new Request('http://dashboard.local/api/onedrive-login'),
+        { env: env(), requestImpl },
+      );
+      return response.json();
+    }
+
+    const html = await loginAgainst(() => ({
+      status: 405,
+      headers: { 'content-type': 'text/html' },
+      body: 'Sorry, unable to open the file at this time.',
+    }));
+    assert.match(html.message, /bukan JSON/);
+    assert.equal(html.message.includes('belum punya aksi'), false);
+
+    const missing = await loginAgainst(() => ({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'success' }),
+    }));
+    assert.match(missing.message, /belum punya aksi OneDrive/);
+    assert.equal(missing.message.includes('bukan JSON'), false);
+  });
+
   test('client publik yang ditolak Microsoft dijelaskan', async () => {
     const { requestImpl } = makeWorld({ loginMode: 'invalid_client' });
     const response = await handleOneDriveLoginRequest(new Request('http://dashboard.local/api/onedrive-login', {

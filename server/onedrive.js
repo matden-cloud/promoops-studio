@@ -69,6 +69,18 @@ function parseJsonSafe(text) {
   }
 }
 
+function parseJsonObject(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return null;
+  try {
+    const value = JSON.parse(trimmed);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 function scrubString(text, secrets) {
   let out = String(text);
   for (const secret of secrets) {
@@ -178,11 +190,14 @@ async function postAppsScript(env, requestImpl, action, data, secrets) {
     throw new HttpError(502, 'Gagal menghubungi Apps Script.');
   }
 
-  const parsed = parseJsonSafe(scrubString(asText(upstream.body), secrets));
+  const parsed = parseJsonObject(scrubString(asText(upstream.body), secrets));
+  if (!parsed) {
+    throw new HttpError(502, 'Balasan Apps Script tidak terbaca. Responsnya bukan JSON.');
+  }
   if (upstream.status === 401 || parsed.message === 'Unauthorized') {
     throw new HttpError(502, 'Apps Script menolak token. Periksa APPS_SCRIPT_TOKEN.');
   }
-  if (action === 'get_onedrive_token' && parsed.refreshToken == null && parsed.status !== 'error') {
+  if (action === 'get_onedrive_token' && !Object.hasOwn(parsed, 'refreshToken') && parsed.status !== 'error') {
     throw new HttpError(502, 'Apps Script belum punya aksi OneDrive. Tempel snippet lalu deploy versi baru pada deployment yang sama.');
   }
   if (upstream.status < 200 || upstream.status >= 300 || parsed.status === 'error') {

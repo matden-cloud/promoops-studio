@@ -170,7 +170,7 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
     }
   });
 
-  test('POST meneruskan whitelist, menimpa token klien, dan mengikuti 302 tanpa mengubah POST menjadi GET', async () => {
+  test('POST dijalankan sekali, lalu balasan 302 dibaca dengan GET', async () => {
     const token = 'token-server';
     const upstream = await startUpstream((_req, res, recorded) => {
       if (recorded.pathname === '/exec') {
@@ -183,7 +183,7 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
       res.end(JSON.stringify({
         status: 'success',
         token,
-        echo: recorded.body,
+        method: recorded.method,
       }));
     });
 
@@ -207,10 +207,9 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
         assert.equal(body.token, '[redacted]');
       }
 
-      const posts = upstream.requests.filter((item) => item.pathname === '/exec-final');
+      const posts = upstream.requests.filter((item) => item.pathname === '/exec' && item.method === 'POST');
       assert.equal(posts.length, POST_ACTIONS.size);
       for (const posted of posts) {
-        assert.equal(posted.method, 'POST');
         assert.equal(posted.token, token);
         assert.equal(posted.contentType, 'text/plain;charset=utf-8');
         const parsed = JSON.parse(posted.body);
@@ -218,6 +217,14 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
         assert.equal(parsed.extra, undefined);
         assert.equal(POST_ACTIONS.has(parsed.action), true);
         assert.deepEqual(parsed.data, { id: parsed.action, catatan: 'aman' });
+      }
+
+      const echoes = upstream.requests.filter((item) => item.pathname === '/exec-final');
+      assert.equal(echoes.length, POST_ACTIONS.size);
+      for (const echo of echoes) {
+        assert.equal(echo.method, 'GET');
+        assert.equal(echo.body, '');
+        assert.equal(echo.token, null);
       }
 
       const blocked = await handleAppsScriptRequest(new Request('http://dashboard.local/api/apps-script', {
@@ -539,9 +546,11 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
         body: JSON.stringify({ action: 'update_violation', data: { id: 7, status: 'Banding' } }),
       });
       assert.equal(saved.status, 200);
-      const finalPosts = upstream.requests.filter((item) => item.pathname === '/done' && item.method === 'POST');
-      assert.equal(finalPosts.length, 1);
-      assert.equal(JSON.parse(finalPosts[0].body).action, 'update_violation');
+      const execPosts = upstream.requests.filter((item) => item.pathname === '/exec' && item.method === 'POST');
+      assert.equal(execPosts.length, 1);
+      assert.equal(JSON.parse(execPosts[0].body).action, 'update_violation');
+      assert.equal(upstream.requests.filter((item) => item.pathname === '/done' && item.method === 'POST').length, 0);
+      assert.ok(upstream.requests.some((item) => item.pathname === '/done' && item.method === 'GET'));
 
       const ai = await fetch(`${base}/api/gemini`, {
         method: 'POST',
@@ -670,7 +679,8 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
       const data = await fetch(`${base}/api/apps-script`);
       assert.equal(data.status, 200);
       assert.equal((await data.json()).status, 'success');
-      assert.equal(upstream.requests.some((item) => item.pathname === '/done' && item.method === 'GET' && item.token === token), true);
+      assert.equal(upstream.requests.some((item) => item.pathname === '/exec' && item.method === 'GET' && item.token === token), true);
+      assert.equal(upstream.requests.some((item) => item.pathname === '/done' && item.method === 'GET'), true);
 
       const update = await fetch(`${base}/api/apps-script?action=run_update`);
       assert.equal(update.status, 200);
@@ -682,7 +692,11 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
         body: JSON.stringify({ action: 'save_winning_web', data: { produk: 'Kawat', isWinning: true } }),
       });
       assert.equal(save.status, 200);
-      assert.equal((await save.json()).report.action, 'save_winning_web');
+      assert.equal((await save.json()).status, 'success');
+      const execPosts = upstream.requests.filter((item) => item.pathname === '/exec' && item.method === 'POST');
+      assert.equal(execPosts.length, 1);
+      assert.equal(JSON.parse(execPosts[0].body).action, 'save_winning_web');
+      assert.equal(upstream.requests.filter((item) => item.pathname === '/done' && item.method === 'POST').length, 0);
 
       const blocked = await fetch(`${base}/api/apps-script`, {
         method: 'POST',

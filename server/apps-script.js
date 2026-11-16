@@ -82,16 +82,15 @@ function defaultRequest(url, { method = 'GET', headers, body } = {}) {
   });
 }
 
-// Web App Apps Script membalas 302 sebelum skrip benar-benar berjalan.
-// Fetch bawaan mengubah POST menjadi GET pada 301/302, jadi doPost tidak terpanggil.
+// Web App menjalankan doGet/doPost pada permintaan pertama ke /exec, lalu
+// membalas 302 ke URL sekali pakai di script.googleusercontent.com/macros/echo.
+// Isi balasan hanya terbaca lewat GET ke URL itu. POST ulang ditolak (405 HTML)
+// dan bisa menjalankan doPost untuk kedua kalinya.
 export async function fetchAppsScript(url, options, requestImpl = defaultRequest) {
   let currentUrl = url;
   let method = options.method || 'GET';
   let body = options.body;
   const headers = options.headers;
-  const initial = new URL(url);
-  const token = initial.searchParams.get('token');
-  const action = initial.searchParams.get('action');
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     const response = await requestImpl(currentUrl, {
@@ -107,14 +106,9 @@ export async function fetchAppsScript(url, options, requestImpl = defaultRequest
       throw new HttpError(502, 'Gagal menghubungi Apps Script.');
     }
 
-    const next = new URL(location, currentUrl);
-    if (token) next.searchParams.set('token', token);
-    if (action) next.searchParams.set('action', action);
-    currentUrl = next.toString();
-    if (response.status === 303) {
-      method = 'GET';
-      body = undefined;
-    }
+    currentUrl = new URL(location, currentUrl).toString();
+    method = 'GET';
+    body = undefined;
   }
 
   throw new HttpError(502, 'Gagal menghubungi Apps Script.');
