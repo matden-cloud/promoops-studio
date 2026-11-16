@@ -249,12 +249,30 @@ export function planDriveItem(item, folderLink, byId) {
   };
 }
 
+export const SYNC_DETAIL_LIMIT = 500;
+
 export function emptyStats() {
-  return { baru: 0, diperbarui: 0, dilewati: 0, kembar: [] };
+  return {
+    baru: 0,
+    diperbarui: 0,
+    dilewati: 0,
+    kembar: [],
+    daftarBaru: [],
+    daftarDiubah: [],
+  };
+}
+
+export function pushSyncDetail(list, entry) {
+  if (!Array.isArray(list) || list.length >= SYNC_DETAIL_LIMIT) return false;
+  list.push(entry);
+  return true;
 }
 
 export function normalizeStats(value) {
   const stats = emptyStats();
+  // Daftar file hanya milik batch ini. Jangan salin dari permintaan,
+  // supaya klien yang menumpuk antar batch tidak menerima salinan dobel.
+  // Total tetap di baru dan diperbarui, juga setelah daftar mencapai batas.
   if (!value || typeof value !== 'object' || Array.isArray(value)) return stats;
   stats.baru = clampCount(value.baru);
   stats.diperbarui = clampCount(value.diperbarui);

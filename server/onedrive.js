@@ -14,6 +14,7 @@ import {
   normalizeStats,
   parseCursor,
   planDriveItem,
+  pushSyncDetail,
   rootGraphUrl,
   safeHttpsUrl,
   safeVerificationUri,
@@ -461,7 +462,14 @@ async function runSyncBatch({ env, requestImpl, target, cursor, stats, now, budg
       continue;
     }
     if (decision.action === 'update') {
+      const previous = byId.get(decision.update.idFile) || { namaFile: '', pathFolder: '' };
       updates.push(decision.update);
+      pushSyncDetail(stats.daftarDiubah, {
+        namaLama: previous.namaFile,
+        pathLama: previous.pathFolder,
+        namaBaru: decision.update.namaFile,
+        pathBaru: decision.update.pathFolder,
+      });
       byId.set(decision.update.idFile, {
         namaFile: decision.update.namaFile,
         pathFolder: decision.update.pathFolder,
@@ -498,6 +506,10 @@ async function runSyncBatch({ env, requestImpl, target, cursor, stats, now, budg
     }
 
     inserts.push(decision.row);
+    pushSyncDetail(stats.daftarBaru, {
+      nama: decision.row.Nama_File,
+      path: decision.row.Path_Folder,
+    });
     byId.set(decision.row.Id_File, {
       namaFile: decision.row.Nama_File,
       pathFolder: decision.row.Path_Folder,

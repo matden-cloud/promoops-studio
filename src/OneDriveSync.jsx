@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, FolderOpen, RefreshCw } from 'lucide-react';
 import { ONEDRIVE_TARGETS } from '../server/onedrive-plan.js';
+import {
+  appendSyncDetails,
+  changelogForRun,
+  readSyncChangelog,
+  statsForRequest,
+  writeSyncChangelog,
+} from './syncChangelog.js';
 
 const TARGETS = [ONEDRIVE_TARGETS.final, ONEDRIVE_TARGETS.mentahan];
 
@@ -27,6 +34,91 @@ function safeVerifyHref(value) {
   }
 }
 
+function formatRunTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value || '';
+  return date.toLocaleString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatCount(value) {
+  return Number(value || 0).toLocaleString('id-ID');
+}
+
+function DetailNote({ shown, total }) {
+  if (total <= shown) return null;
+  return (
+    <p className="mt-2 text-xs font-semibold text-gray-500">
+      Menampilkan {formatCount(shown)} dari {formatCount(total)}.
+    </p>
+  );
+}
+
+function SyncChangelog({ log, scanning, onClose, closeDisabled }) {
+  return (
+    <div className="mt-4 rounded-xl border border-gray-200 bg-white p-4" role="region" aria-label={`Hasil sinkron ${log.targetLabel}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-bold text-gray-900">Hasil sinkron {log.targetLabel}</p>
+          <p className="text-xs text-gray-500 mt-0.5">Mulai {formatRunTime(log.startedAt)}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={closeDisabled}
+          className="px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          Tutup
+        </button>
+      </div>
+
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500">File baru ({formatCount(log.totalBaru)})</h3>
+          {log.daftarBaru.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">{scanning ? 'Daftar terisi seiring pemindaian.' : 'Tidak ada file baru.'}</p>
+          ) : (
+            <ul className="mt-2 max-h-80 overflow-y-auto space-y-2">
+              {log.daftarBaru.map((item, index) => (
+                <li key={`baru-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  <p className="text-sm font-semibold text-gray-900 break-all">{item.nama || '—'}</p>
+                  <p className="text-xs text-gray-500 break-all">{item.path || '—'}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <DetailNote shown={log.daftarBaru.length} total={log.totalBaru} />
+        </section>
+
+        <section>
+          <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500">File berubah ({formatCount(log.totalDiubah)})</h3>
+          {log.daftarDiubah.length === 0 ? (
+            <p className="mt-2 text-sm text-gray-500">{scanning ? 'Daftar terisi seiring pemindaian.' : 'Tidak ada file yang berubah.'}</p>
+          ) : (
+            <ul className="mt-2 max-h-80 overflow-y-auto space-y-2">
+              {log.daftarDiubah.map((item, index) => (
+                <li key={`ubah-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2">
+                  <p className="text-sm font-semibold text-gray-900 break-all">{item.namaLama || '—'}</p>
+                  <p className="text-xs text-gray-500 break-all">{item.pathLama || '—'}</p>
+                  <p className="my-1 text-xs font-bold text-emerald-700">→</p>
+                  <p className="text-sm font-semibold text-gray-900 break-all">{item.namaBaru || '—'}</p>
+                  <p className="text-xs text-gray-500 break-all">{item.pathBaru || '—'}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <DetailNote shown={log.daftarDiubah.length} total={log.totalDiubah} />
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export default function OneDriveSync({ onSynced }) {
   const [connected, setConnected] = useState(null);
   const [busy, setBusy] = useState(null);
@@ -35,6 +127,7 @@ export default function OneDriveSync({ onSynced }) {
   const [error, setError] = useState('');
   const [resume, setResume] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [changelog, setChangelog] = useState(() => readSyncChangelog(localStorage));
   const pollTimer = useRef(null);
   const mounted = useRef(true);
 
@@ -150,13 +243,26 @@ export default function OneDriveSync({ onSynced }) {
     }
   }
 
+  function commitLog(next) {
+    setChangelog(next);
+    writeSyncChangelog(localStorage, next);
+  }
+
   async function runSync(targetId) {
     if (busy) return;
     setBusy(targetId);
     setError('');
     const continued = resume?.target === targetId;
+    const target = TARGETS.find((item) => item.id === targetId);
+    let log = changelogForRun(changelog, {
+      continued,
+      targetId,
+      targetLabel: target?.label || targetId,
+      startedAt: new Date().toISOString(),
+    });
+    commitLog(log);
     let cursor = continued ? resume.cursor : null;
-    let stats = continued ? resume.stats : null;
+    let stats = continued ? statsForRequest(resume.stats) : null;
     let lastSerial = '';
     let guard = 0;
     let finished = false;
@@ -176,7 +282,9 @@ export default function OneDriveSync({ onSynced }) {
           if (response.status === 400) cursor = null;
           throw new Error(result.message || 'Sinkron OneDrive gagal.');
         }
-        stats = result.stats;
+        log = appendSyncDetails(log, result.stats);
+        commitLog(log);
+        stats = statsForRequest(result.stats);
         setReport(result);
         if (result.done) {
           finished = true;
@@ -206,6 +314,7 @@ export default function OneDriveSync({ onSynced }) {
   }
 
   const locked = Boolean(busy);
+  const syncing = Boolean(busy && busy !== 'login');
   const kembar = Array.isArray(report?.stats?.kembar) ? report.stats.kembar : [];
 
   return (
@@ -317,6 +426,15 @@ export default function OneDriveSync({ onSynced }) {
             )}
           </div>
         </div>
+      )}
+
+      {changelog && (
+        <SyncChangelog
+          log={changelog}
+          scanning={syncing && busy === changelog.targetId}
+          onClose={() => commitLog(null)}
+          closeDisabled={syncing}
+        />
       )}
 
       {error && (
