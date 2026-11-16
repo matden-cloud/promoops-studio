@@ -8,6 +8,12 @@
     },
     "api/tiktok-resolve.js": {
       "maxDuration": 15
+    },
+    "api/onedrive-sync.js": {
+      "maxDuration": 60
+    },
+    "api/onedrive-login.js": {
+      "maxDuration": 30
     }
   }
 }
