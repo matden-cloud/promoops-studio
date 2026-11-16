@@ -10,6 +10,7 @@ import {
 import { originalUrlForFypRow, originalUrlForPublish } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
 import OneDriveSync from './OneDriveSync.jsx';
+import { useOneDriveSync } from './useOneDriveSync.js';
 import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
@@ -464,6 +465,8 @@ export default function App() {
     }, 0);
     return () => clearTimeout(timer);
   }, []);
+
+  const driveSync = useOneDriveSync(fetchData);
 
   const filterSignature = `${filterBulan}|${filterAkun}|${filterFyp}|${onlyWinningFyp ? '1' : '0'}|${encodeURIComponent(debouncedFypQuery)}`;
   const [pageFilter, setPageFilter] = useState(filterSignature);
@@ -1916,8 +1919,9 @@ export default function App() {
           <button onClick={() => setActiveMenu('pelanggaran')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pelanggaran' ? 'bg-red-50 text-red-700 shadow-sm border border-red-200' : 'text-gray-500 hover:text-red-600'}`}>
             <ShieldAlert className="w-4 h-4" /> Pelanggaran ({violations.length})
           </button>
-          <button onClick={() => setActiveMenu('sinkron')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'sinkron' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+          <button onClick={() => setActiveMenu('sinkron')} aria-busy={driveSync.syncing} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'sinkron' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
             <Bot className="w-4 h-4" /> Sinkron Bot
+            {driveSync.syncing && <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" aria-hidden="true" />}
           </button>
         </div>
 
@@ -3077,7 +3081,16 @@ export default function App() {
             <h2 className="text-2xl font-bold text-gray-900">Sinkron Bot</h2>
             <p className="text-gray-500 mt-1">Hubungkan OneDrive, lalu sinkronkan folder Video Final dan Mentahan ke FILE_ASSET.</p>
           </div>
-          <OneDriveSync onSynced={fetchData} />
+          <OneDriveSync
+            running={driveSync.running}
+            report={driveSync.report}
+            syncError={driveSync.error}
+            resume={driveSync.resume}
+            changelog={driveSync.changelog}
+            needsLogin={driveSync.needsLogin}
+            startSync={driveSync.startSync}
+            dismissChangelog={driveSync.dismissChangelog}
+          />
         </div>
       )}
 

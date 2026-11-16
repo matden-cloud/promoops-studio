@@ -1,13 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ExternalLink, FolderOpen, RefreshCw } from 'lucide-react';
 import { ONEDRIVE_TARGETS } from '../server/onedrive-plan.js';
-import {
-  appendSyncDetails,
-  changelogForRun,
-  readSyncChangelog,
-  statsForRequest,
-  writeSyncChangelog,
-} from './syncChangelog.js';
 
 const TARGETS = [ONEDRIVE_TARGETS.final, ONEDRIVE_TARGETS.mentahan];
 
@@ -119,15 +112,21 @@ function SyncChangelog({ log, scanning, onClose, closeDisabled }) {
   );
 }
 
-export default function OneDriveSync({ onSynced }) {
+export default function OneDriveSync({
+  running,
+  report,
+  syncError,
+  resume,
+  changelog,
+  needsLogin,
+  startSync,
+  dismissChangelog,
+}) {
   const [connected, setConnected] = useState(null);
   const [busy, setBusy] = useState(null);
   const [login, setLogin] = useState(null);
-  const [report, setReport] = useState(null);
   const [error, setError] = useState('');
-  const [resume, setResume] = useState(null);
   const [copied, setCopied] = useState(false);
-  const [changelog, setChangelog] = useState(() => readSyncChangelog(localStorage));
   const pollTimer = useRef(null);
   const mounted = useRef(true);
 
@@ -202,7 +201,7 @@ export default function OneDriveSync({ onSynced }) {
   }
 
   async function connect() {
-    if (busy) return;
+    if (busy || running) return;
     clearTimeout(pollTimer.current);
     setBusy('login');
     setError('');
@@ -243,79 +242,11 @@ export default function OneDriveSync({ onSynced }) {
     }
   }
 
-  function commitLog(next) {
-    setChangelog(next);
-    writeSyncChangelog(localStorage, next);
-  }
-
-  async function runSync(targetId) {
-    if (busy) return;
-    setBusy(targetId);
-    setError('');
-    const continued = resume?.target === targetId;
-    const target = TARGETS.find((item) => item.id === targetId);
-    let log = changelogForRun(changelog, {
-      continued,
-      targetId,
-      targetLabel: target?.label || targetId,
-      startedAt: new Date().toISOString(),
-    });
-    commitLog(log);
-    let cursor = continued ? resume.cursor : null;
-    let stats = continued ? statsForRequest(resume.stats) : null;
-    let lastSerial = '';
-    let guard = 0;
-    let finished = false;
-    try {
-      while (mounted.current && guard < 500) {
-        guard += 1;
-        const response = await fetch('/api/onedrive-sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target: targetId, cursor, stats }),
-        });
-        const result = await readJson(response);
-        if (!mounted.current) return;
-        if (!result) throw new Error('Server tidak membalas dengan JSON.');
-        if (!response.ok || result.status === 'error') {
-          if (result.needsLogin) setConnected(false);
-          if (response.status === 400) cursor = null;
-          throw new Error(result.message || 'Sinkron OneDrive gagal.');
-        }
-        log = appendSyncDetails(log, result.stats);
-        commitLog(log);
-        stats = statsForRequest(result.stats);
-        setReport(result);
-        if (result.done) {
-          finished = true;
-          setResume(null);
-          if (onSynced) await onSynced();
-          break;
-        }
-        const serial = JSON.stringify(result.cursor);
-        if (!result.cursor || serial === lastSerial) {
-          throw new Error('Sinkron berhenti sebelum selesai. Jalankan lagi; file yang sudah masuk tidak diulang.');
-        }
-        lastSerial = serial;
-        cursor = result.cursor;
-        setResume({ target: targetId, cursor, stats });
-      }
-      if (!finished && guard >= 500 && mounted.current) {
-        throw new Error('Sinkron belum selesai. Klik lanjutkan untuk meneruskan.');
-      }
-    } catch (err) {
-      if (!mounted.current) return;
-      if (!finished && cursor) setResume({ target: targetId, cursor, stats });
-      else if (!finished) setResume(null);
-      setError(err.message || 'Sinkron OneDrive gagal.');
-    } finally {
-      if (mounted.current) setBusy(null);
-    }
-  }
-
-  const locked = Boolean(busy);
-  const syncing = Boolean(busy && busy !== 'login');
+  const locked = Boolean(running) || Boolean(busy);
+  const syncing = Boolean(running);
+  const shownConnected = needsLogin ? false : connected;
   const kembar = Array.isArray(report?.stats?.kembar) ? report.stats.kembar : [];
+  const alertText = [syncError, error].filter(Boolean).join(' ');
 
   return (
     <div className="mb-6 print:hidden rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
@@ -325,27 +256,27 @@ export default function OneDriveSync({ onSynced }) {
           <p className="text-sm text-gray-600 mt-1">
             Memindai subfolder. Baris lama tidak dihapus; yang berubah hanya nama, path, dan link folder.
           </p>
-          <p className={`text-xs mt-2 font-semibold ${connected ? 'text-emerald-700' : 'text-amber-700'}`}>
-            {connected === null && 'Memeriksa koneksi OneDrive...'}
-            {connected === true && 'OneDrive terhubung'}
-            {connected === false && 'OneDrive belum terhubung. Masuk sekali dengan kode perangkat.'}
+          <p className={`text-xs mt-2 font-semibold ${shownConnected ? 'text-emerald-700' : 'text-amber-700'}`}>
+            {shownConnected === null && 'Memeriksa koneksi OneDrive...'}
+            {shownConnected === true && 'OneDrive terhubung'}
+            {shownConnected === false && 'OneDrive belum terhubung. Masuk sekali dengan kode perangkat.'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           {TARGETS.map((target) => {
-            const running = busy === target.id;
+            const runningThis = running === target.id;
             const continuing = resume?.target === target.id;
             return (
               <button
                 key={target.id}
                 type="button"
-                onClick={() => runSync(target.id)}
-                disabled={locked || connected === false}
+                onClick={() => startSync(target.id)}
+                disabled={locked || shownConnected === false}
                 title={target.path}
                 className="px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {running ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
-                {running ? 'Memindai...' : (continuing ? `Lanjutkan ${target.label}` : target.button)}
+                {runningThis ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
+                {runningThis ? 'Memindai...' : (continuing ? `Lanjutkan ${target.label}` : target.button)}
               </button>
             );
           })}
@@ -356,7 +287,7 @@ export default function OneDriveSync({ onSynced }) {
             className="px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${busy === 'login' ? 'animate-spin text-emerald-600' : ''}`} />
-            {busy === 'login' ? 'Menunggu masuk...' : connected ? 'Hubungkan ulang' : 'Hubungkan OneDrive'}
+            {busy === 'login' ? 'Menunggu masuk...' : shownConnected ? 'Hubungkan ulang' : 'Hubungkan OneDrive'}
           </button>
         </div>
       </div>
@@ -390,7 +321,7 @@ export default function OneDriveSync({ onSynced }) {
         </div>
       )}
 
-      {busy && busy !== 'login' && (
+      {syncing && (
         <p className="mt-4 text-sm font-semibold text-emerald-700" role="status">Memindai folder dan menyimpan ke FILE_ASSET...</p>
       )}
 
@@ -431,16 +362,16 @@ export default function OneDriveSync({ onSynced }) {
       {changelog && (
         <SyncChangelog
           log={changelog}
-          scanning={syncing && busy === changelog.targetId}
-          onClose={() => commitLog(null)}
+          scanning={syncing && running === changelog.targetId}
+          onClose={dismissChangelog}
           closeDisabled={syncing}
         />
       )}
 
-      {error && (
+      {alertText && (
         <p className="mt-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700" role="alert">
           <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
-          <span>{error}</span>
+          <span>{alertText}</span>
         </p>
       )}
     </div>
