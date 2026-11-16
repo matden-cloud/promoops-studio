@@ -7,7 +7,7 @@ import {
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
   Play, Smartphone
 } from 'lucide-react';
-import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow } from '../server/klip-match.js';
+import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
 import { isItemId } from '../server/onedrive-plan.js';
 import OneDriveSync from './OneDriveSync.jsx';
@@ -1046,6 +1046,11 @@ export default function App() {
       originalUrl = originalUrlForPublish({ klipId: options.klipId }, klipVideos);
     }
     if (!originalUrl && safe && !inspected.ok) originalUrl = safe;
+    if (!fileId && inspected.ok) {
+      const matched = matchOneDriveForTikTokPage(safe, publishVideos, data, klipVideos);
+      fileId = oneDriveFileId(matched.fileId);
+      if (!originalUrl && matched.originalUrl) originalUrl = matched.originalUrl;
+    }
     const playerBase = {
       title: title || 'Video',
       pageUrl: inspected.ok ? safe : '',
@@ -3037,13 +3042,24 @@ export default function App() {
                         </td>
                         <td className="py-3.5 px-4">
                           <p className="font-bold text-gray-800">{v.produk}</p>
-                          {v.linkVideo ? (
-                            <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-0.5 w-max">
-                              Buka Video <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : (
-                            <span className="text-xs text-gray-400 italic">Tanpa link</span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                            {canPlayTikTokUrl(v.linkVideo) && (
+                              <button
+                                type="button"
+                                onClick={() => openTikTokPlayer(v.produk || 'Video pelanggaran', v.linkVideo, { produk: v.produk })}
+                                className="inline-flex items-center gap-1 text-xs font-bold text-white bg-gray-900 hover:bg-black px-2 py-1 rounded-md"
+                              >
+                                <Play className="w-3 h-3" fill="currentColor" /> Putar
+                              </button>
+                            )}
+                            {v.linkVideo ? (
+                              <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 w-max">
+                                Buka Video <ExternalLink className="w-3 h-3" />
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-400 italic">Tanpa link</span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4">
                           <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">
