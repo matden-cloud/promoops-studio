@@ -8,6 +8,9 @@ const POST_ACTIONS = new Set([
   'update_violation',
 ]);
 
+// Aksi OneDrive (token dan FILE_ASSET) sengaja tidak ada di daftar ini.
+// Token hanya lewat /api/onedrive-login dan /api/onedrive-sync.
+
 const GET_ACTIONS = new Set(['run_update']);
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);

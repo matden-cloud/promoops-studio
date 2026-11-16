@@ -1,11 +1,14 @@
 import { handleAppsScriptRequest } from './apps-script.js';
 import { handleGeminiRequest } from './gemini.js';
+import { handleOneDriveLoginRequest, handleOneDriveSyncRequest } from './onedrive.js';
 import { handleTikTokResolveRequest } from './tiktok.js';
 
 const ROUTES = new Map([
   ['/api/apps-script', handleAppsScriptRequest],
   ['/api/gemini', handleGeminiRequest],
   ['/api/tiktok-resolve', handleTikTokResolveRequest],
+  ['/api/onedrive-login', handleOneDriveLoginRequest],
+  ['/api/onedrive-sync', handleOneDriveSyncRequest],
 ]);
 
 const SKIP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive']);

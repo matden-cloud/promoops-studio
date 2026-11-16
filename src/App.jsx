@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { originalUrlForFypRow, originalUrlForPublish } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
+import OneDriveSync from './OneDriveSync.jsx';
 import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
@@ -1962,6 +1963,8 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          <OneDriveSync onSynced={fetchData} />
 
           <div className="mb-6 print:hidden">
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
