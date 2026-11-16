@@ -72,6 +72,47 @@ export function createLinkGraphUrl(itemId) {
   return `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(itemId)}/createLink`;
 }
 
+export function itemMetaGraphUrl(itemId) {
+  const url = new URL(`https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(itemId)}`);
+  url.searchParams.set('$select', 'id,@microsoft.graph.downloadUrl');
+  return url.toString();
+}
+
+export function itemContentGraphUrl(itemId) {
+  return `https://graph.microsoft.com/v1.0/me/drive/items/${encodeURIComponent(itemId)}/content`;
+}
+
+const PLAYBACK_HOSTS = [
+  '1drv.com',
+  'onedrive.live.com',
+  'sharepoint.com',
+  'sharepoint.de',
+  'sharepoint.cn',
+  'sharepoint.us',
+  'microsoftpersonalcontent.com',
+  'svc.ms',
+];
+
+export function isAllowedPlaybackUrl(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:') return false;
+  if (url.username || url.password) return false;
+  if (url.port && url.port !== '443') return false;
+  const host = url.hostname.toLowerCase();
+  return PLAYBACK_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+}
+
+export function isAllowedItemContentUrl(value) {
+  const url = graphUrlParts(value);
+  if (!url) return false;
+  return /^\/v1\.0\/me\/drive\/items\/[^/]+\/content$/.test(url.pathname);
+}
+
 export function isItemId(value) {
   if (typeof value !== 'string' || value.length === 0 || value.length > 500) return false;
   if (/[/\\?#]/.test(value)) return false;

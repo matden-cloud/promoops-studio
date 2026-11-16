@@ -7,6 +7,7 @@ import {
   originalFileUrl,
   originalUrlForFypRow,
   originalUrlForPublish,
+  matchOneDriveForTikTokPage,
 } from './klip-match.js';
 
 const FILE_ID = '5A278D0C5E50242F!sa41210e3b56340668705da817774f7aa';
@@ -100,5 +101,36 @@ describe('baris Laporan FYP ke publish.klipId', () => {
     assert.equal(findPublishForFypRow(row, publishVideos), null);
     assert.equal(originalUrlForFypRow(row, publishVideos, klipVideos), '');
     assert.equal(originalUrlForFypRow(null, publishVideos, klipVideos), '');
+  });
+
+  test('tautan TikTok yang sama dengan publish atau FYP memakai file OneDrive', () => {
+    const matched = matchOneDriveForTikTokPage(
+      `${OTHER_TIKTOK}?is_from_webapp=1`,
+      publishVideos,
+      [],
+      klipVideos,
+    );
+    assert.equal(matched.fileId, OTHER_ID);
+    assert.equal(matched.originalUrl, 'https://1drv.ms/v/c/other');
+
+    const fromFyp = matchOneDriveForTikTokPage(
+      TIKTOK,
+      [],
+      [{ Id_Klip: FILE_ID, Link_Postingan: TIKTOK }],
+      klipVideos,
+    );
+    assert.equal(fromFyp.fileId, FILE_ID);
+    assert.equal(fromFyp.originalUrl, new URL(LINK_HP).href);
+  });
+
+  test('tautan yang tidak ketemu tidak mengarang Id_File', () => {
+    const missed = matchOneDriveForTikTokPage(
+      'https://www.tiktok.com/@toko/video/7000000000000000001',
+      publishVideos,
+      [{ Id_Klip: 'hilang', Link_Postingan: 'https://vt.tiktok.com/lain/' }],
+      klipVideos,
+    );
+    assert.deepEqual(missed, { fileId: '', originalUrl: '' });
+    assert.deepEqual(matchOneDriveForTikTokPage('', publishVideos, [], klipVideos), { fileId: '', originalUrl: '' });
   });
 });

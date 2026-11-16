@@ -7,12 +7,14 @@ import {
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
   Play, Smartphone
 } from 'lucide-react';
-import { originalUrlForFypRow, originalUrlForPublish } from '../server/klip-match.js';
+import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
+import { isItemId } from '../server/onedrive-plan.js';
 import OneDriveSync from './OneDriveSync.jsx';
 import { useOneDriveSync } from './useOneDriveSync.js';
 import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
+import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
 import {
   fileListSearchFields,
@@ -130,6 +132,19 @@ const getFypRowKey = (row) => {
   ].join('__');
 };
 
+function oneDriveFileId(...values) {
+  for (const value of values) {
+    const id = String(value ?? '').trim();
+    if (isItemId(id)) return id;
+  }
+  return '';
+}
+
+function viewCount(value) {
+  const number = parseInt(String(value ?? '').replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(number) && String(value ?? '').trim() !== '' ? number : null;
+}
+
 const APPS_SCRIPT_ENDPOINT = '/api/apps-script';
 
 function createClientId(suffix) {
@@ -183,9 +198,10 @@ function fileLinkHp(row) {
 function FileLinkActions({ file, onPlay }) {
   const pageUrl = safeHttpUrl(file?.url);
   const linkHp = safeHttpUrl(file?.linkHp);
+  const fileId = oneDriveFileId(file?.fileId);
   const tiktok = inspectTikTokUrl(pageUrl).ok;
-  const playable = canPlayTikTokUrl(pageUrl);
-  if (!pageUrl && !linkHp) return null;
+  const playable = canPlayTikTokUrl(pageUrl) || Boolean(fileId);
+  if (!pageUrl && !linkHp && !fileId) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
@@ -195,6 +211,8 @@ function FileLinkActions({ file, onPlay }) {
           onClick={() => onPlay(file.name, pageUrl, {
             showCartNote: file?.kategori === 'Video Terupload (Publish)',
             klipId: file?.klipId || '',
+            fileId: file?.fileId || '',
+            produk: file?.produk || '',
           })}
           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
         >
@@ -235,80 +253,6 @@ function FileLinkActions({ file, onPlay }) {
   );
 }
 
-function TikTokPlayerModal({ player, onClose }) {
-  if (!player) return null;
-  const fallback = safeHttpUrl(player.pageUrl);
-  const originalUrl = player.showCartNote ? safeHttpUrl(player.originalUrl) : '';
-
-  return (
-    <div className="fixed inset-0 bg-gray-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 print:hidden">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-y-auto flex flex-col max-h-[92vh]">
-        <div className="px-5 py-4 bg-gray-900 text-white flex items-start justify-between gap-3 shrink-0">
-          <div className="min-w-0">
-            <h3 className="font-bold text-base leading-tight">Putar di Dashboard</h3>
-            <p className="text-xs text-gray-300 mt-1 break-words">{player.title || 'Video TikTok'}</p>
-          </div>
-          <button type="button" onClick={onClose} className="text-gray-300 hover:text-white bg-gray-800 p-2 rounded-full shrink-0" aria-label="Tutup pemutar">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="bg-black min-h-[240px] overflow-hidden flex items-center justify-center">
-          {player.status === 'loading' && (
-            <p className="text-sm font-semibold text-white px-6 text-center">Membaca tautan TikTok...</p>
-          )}
-          {player.status === 'error' && (
-            <div className="px-6 py-8 text-center">
-              <AlertTriangle className="w-8 h-8 text-amber-400 mx-auto mb-3" />
-              <p className="text-sm font-semibold text-white leading-relaxed">{player.message}</p>
-            </div>
-          )}
-          {player.status === 'ready' && player.embedUrl && (
-            <iframe
-              src={player.embedUrl}
-              title={player.title ? `Pemutar TikTok: ${player.title}` : 'Pemutar TikTok'}
-              className={`w-full aspect-[9/16] bg-black ${player.showCartNote ? 'max-h-[min(70vh,calc(92vh-22rem))]' : 'max-h-[70vh]'}`}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-            />
-          )}
-        </div>
-
-        {player.showCartNote && (
-          <p className="px-5 pt-3 text-xs text-gray-500 leading-relaxed">
-            Video berkeranjang kuning hanya bisa diputar di aplikasi TikTok HP. Kalau layar hitam, pakai tombol di bawah.
-          </p>
-        )}
-
-        <div className="px-5 py-4 bg-white border-t border-gray-200 flex flex-col gap-2 shrink-0">
-          {fallback && (
-            <a
-              href={fallback}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-white hover:bg-gray-50 text-gray-800 text-sm font-bold rounded-xl border border-gray-300"
-            >
-              Buka di TikTok <ExternalLink className="w-4 h-4" />
-            </a>
-          )}
-          {originalUrl && (
-            <a
-              href={originalUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl"
-            >
-              Putar file asli (OneDrive) <ExternalLink className="w-4 h-4" />
-            </a>
-          )}
-          <button type="button" onClick={onClose} className="px-4 py-2.5 bg-gray-900 hover:bg-gray-800 text-white text-sm font-bold rounded-xl">
-            Tutup
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState('pipeline'); 
@@ -364,6 +308,8 @@ export default function App() {
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
   const [tiktokPlayer, setTiktokPlayer] = useState(null);
+  const [comparePick, setComparePick] = useState([]);
+  const [compareOpen, setCompareOpen] = useState(false);
 
   // --- STATE ASISTEN AI PEMBACA WEB & PEMBUAT LAPORAN PPT/PDF ---
   const [isAiAssistantOpen, setIsAiAssistantOpen] = useState(false);
@@ -665,6 +611,7 @@ export default function App() {
         owner: `${normalizePersonName(r.creator) || 'Riset'} • ${r.date || ''}`,
         url: r.url || 'https://onedrive.live.com/',
         linkHp: fileLinkHp(r),
+        fileId: oneDriveFileId(r.fileId, r.Id_File),
         month: m.month,
       });
     });
@@ -693,6 +640,7 @@ export default function App() {
         owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
         url: k.url || 'https://onedrive.live.com/',
         linkHp: fileLinkHp(k),
+        fileId: oneDriveFileId(k.fileId, k.Id_File),
         month: m.month,
       });
     });
@@ -736,6 +684,7 @@ export default function App() {
         url: p.url || 'https://www.tiktok.com/',
         linkHp: fileLinkHp(p),
         klipId: p.klipId || '',
+        fileId: oneDriveFileId(p.klipId, p.fileId),
         month: m.month,
       });
     });
@@ -911,6 +860,7 @@ export default function App() {
         owner: `${cleanCreator || 'Riset'} • ${r.date || 'Tanpa Tanggal'}`,
         url: r.url || 'https://onedrive.live.com/',
         linkHp: fileLinkHp(r),
+        fileId: oneDriveFileId(r.fileId, r.Id_File),
         month: r.month || '',
       });
     });
@@ -936,6 +886,7 @@ export default function App() {
         owner: `Editor: ${cleanEditor || '-'} • ${accountLookup[(k.akunTarget || '').toUpperCase()] || k.akunTarget || ''}`,
         url: k.url || 'https://onedrive.live.com/',
         linkHp: fileLinkHp(k),
+        fileId: oneDriveFileId(k.fileId, k.Id_File),
         month: k.month || '',
       });
     });
@@ -964,6 +915,7 @@ export default function App() {
         url: p.url || 'https://www.tiktok.com/',
         linkHp: fileLinkHp(p),
         klipId: p.klipId || '',
+        fileId: oneDriveFileId(p.klipId, p.fileId),
         month: p.month || '',
       });
     });
@@ -1008,6 +960,7 @@ export default function App() {
         owner: normalizePersonName(r.creator) || 'Riset',
         url: r.url || 'https://onedrive.live.com/',
         linkHp: fileLinkHp(r),
+        fileId: oneDriveFileId(r.fileId, r.Id_File),
         month: r.month || '',
       });
     });
@@ -1025,6 +978,7 @@ export default function App() {
         owner: `Editor: ${normalizePersonName(k.editor) || '-'}`,
         url: k.url || 'https://onedrive.live.com/',
         linkHp: fileLinkHp(k),
+        fileId: oneDriveFileId(k.fileId, k.Id_File),
         month: k.month || '',
       });
     });
@@ -1044,6 +998,7 @@ export default function App() {
         url: p.url || 'https://www.tiktok.com/',
         linkHp: fileLinkHp(p),
         klipId: p.klipId || '',
+        fileId: oneDriveFileId(p.klipId, p.fileId),
         month: p.month || '',
       });
     });
@@ -1078,19 +1033,34 @@ export default function App() {
   const openTikTokPlayer = (title, pageUrl, options = {}) => {
     const safe = safeHttpUrl(pageUrl);
     const showCartNote = !!options.showCartNote;
-    const originalUrl = showCartNote
-      ? (options.fypRow
-        ? originalUrlForFypRow(options.fypRow, publishVideos, klipVideos)
-        : originalUrlForPublish({ klipId: options.klipId }, klipVideos))
-      : '';
+    const inspected = inspectTikTokUrl(safe);
+    let fileId = oneDriveFileId(options.fileId);
+    let originalUrl = '';
+    if (options.fypRow) {
+      const klip = findKlipByFileId(klipVideos, klipIdForFypRow(options.fypRow, publishVideos));
+      fileId = oneDriveFileId(klip?.fileId, klip?.Id_File, options.fypRow.Id_Klip, fileId);
+      originalUrl = originalUrlForFypRow(options.fypRow, publishVideos, klipVideos);
+    } else if (options.klipId || showCartNote) {
+      const klip = findKlipByFileId(klipVideos, options.klipId);
+      fileId = oneDriveFileId(fileId, klip?.fileId, klip?.Id_File, options.klipId);
+      originalUrl = originalUrlForPublish({ klipId: options.klipId }, klipVideos);
+    }
+    if (!originalUrl && safe && !inspected.ok) originalUrl = safe;
+    if (!fileId && inspected.ok) {
+      const matched = matchOneDriveForTikTokPage(safe, publishVideos, data, klipVideos);
+      fileId = oneDriveFileId(matched.fileId);
+      if (!originalUrl && matched.originalUrl) originalUrl = matched.originalUrl;
+    }
     const playerBase = {
-      title: title || 'Video TikTok',
-      pageUrl: safe,
+      title: title || 'Video',
+      pageUrl: inspected.ok ? safe : '',
       showCartNote,
       originalUrl,
+      fileId,
+      produk: options.produk || options.fypRow?.Induk_Barang || '',
+      views: viewCount(options.views ?? options.fypRow?.View),
     };
-    const inspected = inspectTikTokUrl(safe);
-    if (!inspected.ok) {
+    if (!inspected.ok && !fileId) {
       setTiktokPlayer({
         ...playerBase,
         status: 'error',
@@ -1098,21 +1068,22 @@ export default function App() {
       });
       return;
     }
-    if (inspected.videoId) {
+    if (inspected.videoId || fileId) {
       setTiktokPlayer({
         ...playerBase,
-        status: 'ready',
-        videoId: inspected.videoId,
-        embedUrl: buildTikTokEmbedUrl(inspected.videoId),
+        status: inspected.videoId || fileId ? 'ready' : 'loading',
+        videoId: inspected.videoId || '',
+        embedUrl: inspected.videoId ? buildTikTokEmbedUrl(inspected.videoId) : '',
       });
-      return;
+      if (inspected.videoId || !inspected.ok) return;
     }
 
     const requestId = createClientId('tt');
     setTiktokPlayer({
       ...playerBase,
-      status: 'loading',
+      status: fileId ? 'ready' : 'loading',
       requestId,
+      embedUrl: '',
     });
 
     const load = async () => {
@@ -1127,6 +1098,7 @@ export default function App() {
         setTiktokPlayer((prev) => {
           if (!prev || prev.requestId !== requestId) return prev;
           if (!response.ok || !result?.videoId || !result?.embedUrl) {
+            if (prev.fileId) return { ...prev, status: 'ready' };
             const message = typeof result?.message === 'string' ? result.message.trim() : '';
             return {
               ...prev,
@@ -1144,6 +1116,7 @@ export default function App() {
       } catch {
         setTiktokPlayer((prev) => {
           if (!prev || prev.requestId !== requestId) return prev;
+          if (prev.fileId) return { ...prev, status: 'ready' };
           return {
             ...prev,
             status: 'error',
@@ -1153,6 +1126,49 @@ export default function App() {
       }
     };
     load();
+  };
+
+  const compareItemFromFile = (file) => {
+    const pageUrl = safeHttpUrl(file?.url);
+    const inspected = inspectTikTokUrl(pageUrl);
+    const fileId = oneDriveFileId(file?.fileId);
+    return {
+      key: file?.fileKey || file?.name || pageUrl,
+      name: file?.name || 'Video',
+      produk: file?.produk || '',
+      views: null,
+      fileId,
+      pageUrl: inspected.ok ? pageUrl : '',
+      embedUrl: inspected.videoId ? buildTikTokEmbedUrl(inspected.videoId) : '',
+      originalUrl: inspected.ok ? '' : pageUrl,
+    };
+  };
+
+  const compareItemFromFyp = (row) => {
+    const pageUrl = safeHttpUrl(row?.Link_Postingan);
+    const inspected = inspectTikTokUrl(pageUrl);
+    const klip = findKlipByFileId(klipVideos, klipIdForFypRow(row, publishVideos));
+    return {
+      key: getFypRowKey(row),
+      name: klip?.fileName || row?.Nama_File || row?.Induk_Barang || 'Video',
+      produk: row?.Induk_Barang || '',
+      views: viewCount(row?.View),
+      fileId: oneDriveFileId(klip?.fileId, klip?.Id_File, row?.Id_Klip),
+      pageUrl: inspected.ok ? pageUrl : '',
+      embedUrl: inspected.videoId ? buildTikTokEmbedUrl(inspected.videoId) : '',
+      originalUrl: originalUrlForFypRow(row, publishVideos, klipVideos),
+    };
+  };
+
+  const toggleCompare = (item) => {
+    if (!item?.fileId && !item?.embedUrl && !item?.pageUrl) return;
+    setComparePick((prev) => {
+      if (prev.some((entry) => entry.key === item.key)) {
+        return prev.filter((entry) => entry.key !== item.key);
+      }
+      if (prev.length >= 2) return prev;
+      return [...prev, item];
+    });
   };
 
   const getViolationStatusStyle = (status) => {
@@ -1678,7 +1694,14 @@ export default function App() {
                         </div>
                       </div>
 
-                      <FileLinkActions file={file} onPlay={openTikTokPlayer} />
+                      <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                        <CompareButton
+                          selected={comparePick.some((entry) => entry.key === file.fileKey)}
+                          disabled={!file.fileId && !inspectTikTokUrl(safeHttpUrl(file.url)).ok}
+                          onClick={() => toggleCompare(compareItemFromFile(file))}
+                        />
+                        <FileLinkActions file={file} onPlay={openTikTokPlayer} />
+                      </div>
                     </div>
                   );
                 })}
@@ -1697,7 +1720,15 @@ export default function App() {
         </div>
       )}
 
-      <TikTokPlayerModal player={tiktokPlayer} onClose={() => setTiktokPlayer(null)} />
+      <DashboardPlayerModal player={tiktokPlayer} onClose={() => setTiktokPlayer(null)} />
+      <CompareModal items={compareOpen ? comparePick : null} onClose={() => setCompareOpen(false)} />
+      {!compareOpen && (
+        <CompareTray
+          items={comparePick}
+          onOpen={() => setCompareOpen(true)}
+          onClear={() => setComparePick([])}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* MODAL 2: ASISTEN AI PEMBACA WEB & GENERATOR LAPORAN PPT/PDF               */}
@@ -2659,6 +2690,7 @@ export default function App() {
                       const catatanValue = fileKey && Object.prototype.hasOwnProperty.call(fypCatatanDraft, draftKey)
                         ? fypCatatanDraft[draftKey]
                         : savedCatatan;
+                      const compareFyp = compareItemFromFyp(row);
 
                       return (
                         <tr key={getFypRowKey(row)} className={`transition-colors ${fileWinInfo.isWinning ? 'bg-amber-50/50 hover:bg-amber-50' : 'hover:bg-gray-50'}`}>
@@ -2694,7 +2726,7 @@ export default function App() {
                                 </div>
                                 {row.Link_Postingan ? (
                                   <div className="flex flex-wrap items-center gap-2 mt-1">
-                                    {canPlayTikTokUrl(row.Link_Postingan) && (
+                                    {(compareFyp.fileId || canPlayTikTokUrl(row.Link_Postingan)) && (
                                       <button
                                         type="button"
                                         onClick={() => openTikTokPlayer(row.Induk_Barang || 'Video TikTok', row.Link_Postingan, {
@@ -2706,6 +2738,11 @@ export default function App() {
                                         <Play className="w-3 h-3" fill="currentColor" /> Play
                                       </button>
                                     )}
+                                    <CompareButton
+                                      selected={comparePick.some((entry) => entry.key === compareFyp.key)}
+                                      disabled={!compareFyp.fileId && !compareFyp.embedUrl && !compareFyp.pageUrl}
+                                      onClick={() => toggleCompare(compareFyp)}
+                                    />
                                     <a href={row.Link_Postingan} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 w-max">
                                       Buka di TikTok <ExternalLink className="w-3 h-3"/>
                                     </a>
@@ -3005,13 +3042,24 @@ export default function App() {
                         </td>
                         <td className="py-3.5 px-4">
                           <p className="font-bold text-gray-800">{v.produk}</p>
-                          {v.linkVideo ? (
-                            <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 mt-0.5 w-max">
-                              Buka Video <ExternalLink className="w-3 h-3" />
-                            </a>
-                          ) : (
-                            <span className="text-xs text-gray-400 italic">Tanpa link</span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                            {canPlayTikTokUrl(v.linkVideo) && (
+                              <button
+                                type="button"
+                                onClick={() => openTikTokPlayer(v.produk || 'Video pelanggaran', v.linkVideo, { produk: v.produk })}
+                                className="inline-flex items-center gap-1 text-xs font-bold text-white bg-gray-900 hover:bg-black px-2 py-1 rounded-md"
+                              >
+                                <Play className="w-3 h-3" fill="currentColor" /> Putar
+                              </button>
+                            )}
+                            {v.linkVideo ? (
+                              <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 w-max">
+                                Buka Video <ExternalLink className="w-3 h-3" />
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-400 italic">Tanpa link</span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 px-4">
                           <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">

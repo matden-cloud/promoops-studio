@@ -65,3 +65,15 @@ export function originalUrlForPublish(publish, klipVideos) {
 export function originalUrlForFypRow(row, publishVideos, klipVideos) {
   return originalFileUrl(findKlipByFileId(klipVideos, klipIdForFypRow(row, publishVideos)));
 }
+
+export function matchOneDriveForTikTokPage(pageUrl, publishVideos, fypRows, klipVideos) {
+  const page = pageKey(pageUrl);
+  if (!page) return { fileId: '', originalUrl: '' };
+  const publish = (Array.isArray(publishVideos) ? publishVideos : []).find((item) => pageKey(item?.url) === page);
+  const fyp = (Array.isArray(fypRows) ? fypRows : []).find((row) => pageKey(row?.Link_Postingan) === page);
+  const klipId = String(publish?.klipId ?? fyp?.Id_Klip ?? '').trim();
+  const klip = findKlipByFileId(klipVideos, klipId);
+  const fileId = String(klip?.fileId ?? '').trim();
+  if (!fileId) return { fileId: '', originalUrl: '' };
+  return { fileId, originalUrl: originalFileUrl(klip) };
+}
