@@ -11,6 +11,11 @@ import {
   isAllowedChildrenUrl,
   isAllowedCreateLink,
   isAllowedGraphRead,
+  isAllowedItemContentUrl,
+  isAllowedPlaybackUrl,
+  isItemId,
+  itemContentGraphUrl,
+  itemMetaGraphUrl,
   normalizeStats,
   parseCursor,
   planDriveItem,
@@ -652,6 +657,107 @@ function publicError(err, secrets) {
   const body = { status: 'error', message: scrubString(message, secrets) };
   if (err instanceof HttpError && err.extra?.needsLogin) body.needsLogin = true;
   return json(scrubValue(body, secrets), status);
+}
+
+function redirect(location) {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: location,
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
+function playbackUrlOrNull(value, secrets) {
+  if (!isAllowedPlaybackUrl(value)) return null;
+  for (const secret of secrets) {
+    if (typeof secret === 'string' && secret.length >= 12 && value.includes(secret)) return null;
+  }
+  return value;
+}
+
+function locationOf(response) {
+  const headers = response?.headers || {};
+  return headers.location || headers.Location || '';
+}
+
+async function graphContentLocation(requestImpl, url, accessToken) {
+  if (!isAllowedItemContentUrl(url)) throw new HttpError(502, 'Permintaan OneDrive ditolak.');
+  let response;
+  try {
+    response = await requestImpl(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+  } catch (err) {
+    if (err && err.message === 'timeout') {
+      throw new HttpError(504, 'OneDrive terlalu lama membalas.');
+    }
+    throw new HttpError(502, 'Gagal menghubungi OneDrive.');
+  }
+  return {
+    status: response.status || 0,
+    location: typeof locationOf(response) === 'string' ? locationOf(response) : '',
+  };
+}
+
+async function resolvePlaybackUrl({ requestImpl, itemId, auth, refresh, secrets }) {
+  const meta = await graphCallWithRefresh(requestImpl, itemMetaGraphUrl(itemId), auth, {}, refresh);
+  if (meta.status === 404) throw new HttpError(404, 'File OneDrive tidak ditemukan.');
+  if (meta.status === 403) throw new HttpError(403, 'Tidak ada izin membaca file OneDrive itu.');
+  if (meta.status !== 200) throw new HttpError(502, 'Gagal membaca file OneDrive.');
+  const fromMeta = playbackUrlOrNull(meta.parsed?.['@microsoft.graph.downloadUrl'], secrets);
+  if (fromMeta) return fromMeta;
+
+  let content = await graphContentLocation(requestImpl, itemContentGraphUrl(itemId), auth.accessToken);
+  if (content.status === 401) {
+    const next = await refresh();
+    auth.accessToken = next.accessToken;
+    auth.refreshToken = next.refreshToken;
+    content = await graphContentLocation(requestImpl, itemContentGraphUrl(itemId), auth.accessToken);
+  }
+  if (content.status === 401) {
+    throw needsLoginError('Sesi OneDrive berakhir. Hubungkan ulang dari dashboard.');
+  }
+  const fromContent = playbackUrlOrNull(content.location, secrets);
+  if (fromContent) return fromContent;
+  throw new HttpError(502, 'File OneDrive tidak bisa diputar.');
+}
+
+export async function handleOneDriveStreamRequest(request, deps = {}) {
+  const env = deps.env || process.env;
+  const requestImpl = deps.requestImpl || defaultRequest;
+  const secrets = [];
+
+  try {
+    if (request.method.toUpperCase() !== 'GET' && request.method.toUpperCase() !== 'HEAD') {
+      throw new HttpError(405, 'Metode tidak diizinkan.');
+    }
+    const itemId = new URL(request.url).searchParams.get('id');
+    if (!isItemId(typeof itemId === 'string' ? itemId.trim() : '')) {
+      throw new HttpError(400, 'Id file OneDrive tidak valid.');
+    }
+    const id = itemId.trim();
+
+    const tokenState = await postAppsScript(env, requestImpl, 'get_onedrive_token', {}, secrets);
+    const refreshToken = String(tokenState.refreshToken || '').trim();
+    if (!refreshToken) {
+      throw needsLoginError('OneDrive belum terhubung. Masuk sekali dengan kode perangkat.');
+    }
+    const auth = await refreshAccessToken({ env, requestImpl, refreshToken, secrets });
+    const refresh = () => refreshAccessToken({
+      env,
+      requestImpl,
+      refreshToken: auth.refreshToken,
+      secrets,
+    });
+    const playback = await resolvePlaybackUrl({ requestImpl, itemId: id, auth, refresh, secrets });
+    return redirect(playback);
+  } catch (err) {
+    return publicError(err, secrets);
+  }
 }
 
 export async function handleOneDriveLoginRequest(request, deps = {}) {

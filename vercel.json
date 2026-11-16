@@ -14,6 +14,9 @@
     },
     "api/onedrive-login.js": {
       "maxDuration": 30
+    },
+    "api/onedrive-stream.js": {
+      "maxDuration": 30
     }
   }
 }

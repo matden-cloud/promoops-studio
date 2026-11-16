@@ -4,7 +4,7 @@ import path from 'node:path';
 import { describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { POST_ACTIONS, handleAppsScriptRequest } from './apps-script.js';
-import { handleOneDriveLoginRequest, handleOneDriveSyncRequest } from './onedrive.js';
+import { handleOneDriveLoginRequest, handleOneDriveStreamRequest, handleOneDriveSyncRequest } from './onedrive.js';
 import {
   FILE_ASSET_COLUMNS,
   ONEDRIVE_AUTHORITY,
@@ -13,6 +13,7 @@ import {
   classifyFile,
   isAllowedChildrenUrl,
   isAllowedGraphRead,
+  isAllowedPlaybackUrl,
   normalizeStats,
   oneDrivePathFolder,
   planDriveItem,
@@ -20,6 +21,7 @@ import {
   rootGraphUrl,
   safeVerificationUri,
   SYNC_DETAIL_LIMIT,
+  itemMetaGraphUrl,
 } from './onedrive-plan.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -791,3 +793,155 @@ describe('batas aman', () => {
     assert.equal(source.includes('client_secret'), false);
   });
 });
+
+describe('putar file OneDrive', () => {
+  const DOWNLOAD = 'https://public.sn.files.1drv.com/y4m/iklan.mp4?tempauth=pendek';
+
+  function streamEnv() {
+    return env();
+  }
+
+  function scriptAndGraph(graph) {
+    const saves = [];
+    const requestImpl = async (url, options = {}) => {
+      const target = new URL(url);
+      if (target.hostname === 'login.microsoftonline.com') {
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({
+            access_token: ACCESS,
+            refresh_token: REFRESH_BARU,
+            expires_in: 3600,
+          }),
+        };
+      }
+      if (target.pathname === '/exec') {
+        const payload = JSON.parse(options.body);
+        assert.equal(payload.token, APPS_TOKEN);
+        if (payload.action === 'get_onedrive_token') {
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({ status: 'success', refreshToken: REFRESH_LAMA }),
+          };
+        }
+        if (payload.action === 'save_onedrive_token') {
+          saves.push(payload.data.refreshToken);
+          return { status: 200, headers: {}, body: JSON.stringify({ status: 'success' }) };
+        }
+        return { status: 200, headers: {}, body: JSON.stringify({ status: 'error', message: payload.action }) };
+      }
+      return graph(target, options, saves);
+    };
+    return { requestImpl, saves };
+  }
+
+  test('id tidak valid ditolak sebelum menghubungi OneDrive', async () => {
+    let called = false;
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=a/b'),
+      { env: streamEnv(), requestImpl: async () => { called = true; return { status: 500, body: '' }; } },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 400);
+    assert.match(body.message, /tidak valid/);
+    assert.equal(called, false);
+  });
+
+  test('downloadUrl diizinkan dialihkan dan token tidak ikut', async () => {
+    const { requestImpl, saves } = scriptAndGraph((target, options) => {
+      assert.equal(target.hostname, 'graph.microsoft.com');
+      assert.equal(target.pathname, '/v1.0/me/drive/items/FILE!abc');
+      assert.equal(target.searchParams.get('$select').includes('downloadUrl'), true);
+      assert.equal(options.headers.Authorization, `Bearer ${ACCESS}`);
+      return {
+        status: 200,
+        headers: {},
+        body: JSON.stringify({
+          id: 'FILE!abc',
+          '@microsoft.graph.downloadUrl': DOWNLOAD,
+        }),
+      };
+    });
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc'),
+      { env: streamEnv(), requestImpl },
+    );
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), DOWNLOAD);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    const text = await response.text();
+    assert.equal(text, '');
+    assertNoSecrets(`${text} ${response.headers.get('location')}`);
+    assert.equal(saves.includes(REFRESH_BARU), true);
+    assert.equal(itemMetaGraphUrl('FILE!abc').includes('/items/FILE!abc'), true);
+  });
+
+  test('tautan unduh asing dan yang memuat token ditolak', async () => {
+    for (const bad of [
+      'https://evil.example/file.mp4',
+      `https://public.sn.files.1drv.com/y4m/x.mp4?token=${ACCESS}`,
+    ]) {
+      const { requestImpl } = scriptAndGraph(() => ({
+        status: 200,
+        headers: {},
+        body: JSON.stringify({ '@microsoft.graph.downloadUrl': bad }),
+      }));
+      const response = await handleOneDriveStreamRequest(
+        new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc'),
+        { env: streamEnv(), requestImpl },
+      );
+      const body = await response.json();
+      assert.equal(response.status, 502, JSON.stringify(body));
+      assert.equal(response.headers.get('location'), null);
+      assertNoSecrets(JSON.stringify(body));
+    }
+    assert.equal(isAllowedPlaybackUrl(DOWNLOAD), true);
+    assert.equal(isAllowedPlaybackUrl('https://files.1drv.com.evil.test/a.mp4'), false);
+    assert.equal(isAllowedPlaybackUrl('http://public.sn.files.1drv.com/a.mp4'), false);
+  });
+
+  test('tanpa downloadUrl mengikuti lokasi /content yang aman', async () => {
+    const { requestImpl } = scriptAndGraph((target, options) => {
+      if (target.pathname.endsWith('/content')) {
+        assert.equal(options.headers.Authorization, `Bearer ${ACCESS}`);
+        return {
+          status: 302,
+          headers: { location: DOWNLOAD },
+          body: '',
+        };
+      }
+      return { status: 200, headers: {}, body: JSON.stringify({ id: 'FILE!abc' }) };
+    });
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc'),
+      { env: streamEnv(), requestImpl },
+    );
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), DOWNLOAD);
+    assertNoSecrets(response.headers.get('location'));
+  });
+
+  test('tanpa refresh token minta hubungkan ulang', async () => {
+    const requestImpl = async (url, options = {}) => {
+      const target = new URL(url);
+      if (target.pathname === '/exec') {
+        const payload = JSON.parse(options.body);
+        if (payload.action === 'get_onedrive_token') {
+          return { status: 200, headers: {}, body: JSON.stringify({ status: 'success', refreshToken: '' }) };
+        }
+      }
+      return { status: 500, headers: {}, body: '' };
+    };
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc'),
+      { env: streamEnv(), requestImpl },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 401);
+    assert.equal(body.needsLogin, true);
+    assertNoSecrets(JSON.stringify(body));
+  });
+});
+
