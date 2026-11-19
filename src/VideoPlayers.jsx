@@ -266,10 +266,10 @@ export function CompareModal({ items, onClose }) {
   );
 }
 
-export function CompareTray({ items, onOpen, onClear }) {
+export function CompareTray({ items, onOpen, onClear, elevated = false }) {
   if (!items?.length) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 w-[min(640px,calc(100%-2rem))] print:hidden">
+    <div className={`fixed bottom-4 left-1/2 -translate-x-1/2 ${elevated ? 'z-[55]' : 'z-40'} w-[min(640px,calc(100%-2rem))] print:hidden`}>
       <div className="rounded-2xl border border-gray-200 bg-white shadow-lg px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase text-gray-500">Bandingkan</p>
