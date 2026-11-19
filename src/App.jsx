@@ -5,7 +5,7 @@ import {
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
-  Play, Smartphone
+  Play, Smartphone, Package
 } from 'lucide-react';
 import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
@@ -14,6 +14,7 @@ import OneDriveSync from './OneDriveSync.jsx';
 import { useOneDriveSync } from './useOneDriveSync.js';
 import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
+import RekapProdukPanel from './RekapProdukPanel.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
 import {
@@ -37,6 +38,16 @@ import {
   starMonthForSelection,
   toYearMonth,
 } from './starHistory.js';
+import {
+  VIEW_BUCKETS,
+  currentYearMonth,
+  filterRekapVideos,
+  formatIdNumber,
+  formatUploadDate,
+  parseViewCount,
+  rekapMonthChoices,
+  rowYearMonth,
+} from './rekapProduk.js';
 
 const DEFAULT_VIOLATION_TYPES = [
   "Produk Berbahaya / Tajam",
@@ -209,14 +220,16 @@ function FileLinkActions({ file, onPlay }) {
         <button
           type="button"
           onClick={() => onPlay(file.name, pageUrl, {
-            showCartNote: file?.kategori === 'Video Terupload (Publish)',
+            showCartNote: file?.kategori === 'Video Terupload (Publish)' || !!file?.showCartNote,
             klipId: file?.klipId || '',
             fileId: file?.fileId || '',
             produk: file?.produk || '',
+            views: file?.views,
+            fypRow: file?.fypRow,
           })}
           className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-900 hover:bg-black text-white text-xs font-bold rounded-lg shadow-sm transition-colors"
         >
-          <Play className="w-3.5 h-3.5" fill="currentColor" /> Play
+          <Play className="w-3.5 h-3.5" fill="currentColor" /> Putar
         </button>
       )}
       {pageUrl && !tiktok && (
@@ -302,6 +315,8 @@ export default function App() {
   const [starRows, setStarRows] = useState([]);
   const [fypCompareBulan, setFypCompareBulan] = useState('');
   const [rekapCompareBulan, setRekapCompareBulan] = useState('');
+  const [produkBulan, setProdukBulan] = useState(() => currentYearMonth());
+  const [produkCompareBulan, setProdukCompareBulan] = useState('');
   const [savingFileKey, setSavingFileKey] = useState(null);
   const [onlyWinningInModal, setOnlyWinningInModal] = useState(false);
 
@@ -1030,6 +1045,39 @@ export default function App() {
     });
   };
 
+  const openRekapProdukVideos = ({ produk, bucket }) => {
+    const matched = filterRekapVideos(data, { month: produkBulan, produk, bucket });
+    if (!matched.length) return;
+    const bucketLabel = bucket === 'upload'
+      ? 'Upload'
+      : (VIEW_BUCKETS.find((item) => item.id === bucket)?.label || 'Video');
+    const files = matched.map((row) => {
+      const base = getFypFileObj(row);
+      const klip = findKlipByFileId(klipVideos, klipIdForFypRow(row, publishVideos));
+      const views = parseViewCount(row.View);
+      const akunRaw = row.Nama_Akun || row.Id_Akun || '';
+      const akun = accountLookup[String(akunRaw).toUpperCase()] || akunRaw;
+      const dateLabel = formatUploadDate(row);
+      const fyp = String(row.Video_FYP || '').trim();
+      return {
+        ...base,
+        produk: String(row.Induk_Barang || '').replace(/\s+/g, ' ').trim(),
+        month: rowYearMonth(row) || produkBulan,
+        name: row.Nama_File || row.Induk_Barang || 'Video',
+        status: views == null ? 'Belum ada angka view' : `${formatIdNumber(views)} view`,
+        owner: [akun, dateLabel, fyp].filter(Boolean).join(' • '),
+        url: row.Link_Postingan || '',
+        linkHp: fileLinkHp(row),
+        fileId: oneDriveFileId(klip?.fileId, klip?.Id_File, row.Id_Klip),
+        klipId: klipIdForFypRow(row, publishVideos),
+        views,
+        showCartNote: true,
+        fypRow: row,
+      };
+    });
+    openRealFilesModal(produk || 'Semua produk', bucketLabel, files, produkBulan);
+  };
+
   const openTikTokPlayer = (title, pageUrl, options = {}) => {
     const safe = safeHttpUrl(pageUrl);
     const showCartNote = !!options.showCartNote;
@@ -1136,7 +1184,7 @@ export default function App() {
       key: file?.fileKey || file?.name || pageUrl,
       name: file?.name || 'Video',
       produk: file?.produk || '',
-      views: null,
+      views: file?.views ?? null,
       fileId,
       pageUrl: inspected.ok ? pageUrl : '',
       embedUrl: inspected.videoId ? buildTikTokEmbedUrl(inspected.videoId) : '',
@@ -1557,6 +1605,10 @@ export default function App() {
   const rekapBaseMonth = toYearMonth(rekapBulan);
   const rekapCompareOptions = compareMonthOptions(rekapBaseMonth, starRows, availableMonthsRekap);
   const rekapCompareResult = compareStarMonths(starRows, rekapBaseMonth, rekapCompareBulan, 'pipeline');
+  const produkMonthOptions = rekapMonthChoices(data);
+  const produkBaseMonth = toYearMonth(produkBulan);
+  const produkCompareOptions = compareMonthOptions(produkBaseMonth, starRows, produkMonthOptions);
+  const produkCompareResult = compareStarMonths(starRows, produkBaseMonth, produkCompareBulan, 'fyp');
 
   const statTotalVideo = filteredData.length;
   const statTotalView = filteredData.reduce((sum, item) => sum + (parseInt(String(item.View).replace(/[^0-9]/g, '')) || 0), 0);
@@ -1587,8 +1639,14 @@ export default function App() {
       {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE (BISA TANDAI BINTANG PER FILE)     */}
       {/* ========================================================================= */}
       {drillDownModal && (
-        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200 print:hidden">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh] animate-in zoom-in-95 duration-200">
+        <div
+          className={`fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 animate-in fade-in duration-200 print:hidden ${comparePick.length ? 'overflow-y-auto p-3 sm:p-4' : 'flex items-center justify-center p-4'}`}
+          style={comparePick.length ? { paddingBottom: 220 } : undefined}
+        >
+          <div
+            className={`bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200 ${comparePick.length ? 'mx-auto my-2 sm:my-6' : ''}`}
+            style={{ maxHeight: comparePick.length ? 'calc(100vh - 240px)' : '85vh' }}
+          >
             <div className="px-6 py-4 bg-gray-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3">
                 <FolderOpen className="w-6 h-6 text-emerald-400 shrink-0" />
@@ -1633,6 +1691,7 @@ export default function App() {
               ) : modalVisible.map((file, idx) => {
                   const bulan = modalMonthFor(file);
                   const fileWinInfo = lookupFileStar(file.fileKey, bulan);
+                  const compareItem = file.fypRow ? compareItemFromFyp(file.fypRow) : compareItemFromFile(file);
                   const starLocked = starMode === 'history' && !bulan;
                   return (
                     <div key={file.fileKey || idx} className={`py-3.5 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg transition-colors ${fileWinInfo.isWinning ? 'bg-amber-50/50 hover:bg-amber-50/80' : 'hover:bg-white'}`}>
@@ -1696,9 +1755,9 @@ export default function App() {
 
                       <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
                         <CompareButton
-                          selected={comparePick.some((entry) => entry.key === file.fileKey)}
-                          disabled={!file.fileId && !inspectTikTokUrl(safeHttpUrl(file.url)).ok}
-                          onClick={() => toggleCompare(compareItemFromFile(file))}
+                          selected={comparePick.some((entry) => entry.key === compareItem.key)}
+                          disabled={!compareItem.fileId && !compareItem.embedUrl && !compareItem.pageUrl}
+                          onClick={() => toggleCompare(compareItem)}
                         />
                         <FileLinkActions file={file} onPlay={openTikTokPlayer} />
                       </div>
@@ -1725,6 +1784,7 @@ export default function App() {
       {!compareOpen && (
         <CompareTray
           items={comparePick}
+          elevated={!!drillDownModal}
           onOpen={() => setCompareOpen(true)}
           onClear={() => setComparePick([])}
         />
@@ -1946,6 +2006,9 @@ export default function App() {
           </button>
           <button onClick={() => setActiveMenu('analitik')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'analitik' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
             <BarChart2 className="w-4 h-4" /> Laporan FYP
+          </button>
+          <button onClick={() => setActiveMenu('produk')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'produk' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+            <Package className="w-4 h-4" /> Rekap Produk
           </button>
           <button onClick={() => setActiveMenu('pelanggaran')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pelanggaran' ? 'bg-red-50 text-red-700 shadow-sm border border-red-200' : 'text-gray-500 hover:text-red-600'}`}>
             <ShieldAlert className="w-4 h-4" /> Pelanggaran ({violations.length})
@@ -2831,6 +2894,32 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* HALAMAN: REKAP PRODUK (DATA_VIEW)                                         */}
+      {/* ========================================================================= */}
+      {activeMenu === 'produk' && (
+        <div className="p-4 md:p-8 max-w-[1400px] mx-auto">
+          <RekapProdukPanel
+            loading={loading}
+            rows={data}
+            month={produkBulan}
+            monthOptions={produkMonthOptions}
+            onMonthChange={setProdukBulan}
+            onOpenVideos={openRekapProdukVideos}
+          >
+            {starMode === 'history' && (
+              <StarMonthCompare
+                baseMonth={produkBaseMonth}
+                compareMonth={produkCompareBulan}
+                onCompareMonth={setProdukCompareBulan}
+                options={produkCompareOptions}
+                result={produkCompareResult}
+              />
+            )}
+          </RekapProdukPanel>
         </div>
       )}
 
