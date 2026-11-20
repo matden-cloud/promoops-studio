@@ -58,6 +58,12 @@ export function normName(value) {
 
 export const REPLIZ_ACCOUNT_MAP_KEY = 'promoops.replizAccountMap';
 
+// Handle yang normalisasinya tidak sama persis dengan nama MASTER_AKUN.
+// @pasar.digital79 → pasardigital, sedangkan "Pasar Digitals" → pasardigitals.
+export const KNOWN_HANDLE_OVERRIDES = Object.freeze([
+  { handle: 'pasar.digital79', id: 'AKN_005', nama: 'Pasar Digitals' },
+]);
+
 export function normalizeAccountName(value) {
   return text(value)
     .toLowerCase()
@@ -65,6 +71,16 @@ export function normalizeAccountName(value) {
     .replace(/\p{M}/gu, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+}
+
+export function normalizeAccountHandle(value) {
+  return text(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/@/g, '')
+    .replace(/[.\s_]+/g, '')
+    .replace(/\d+$/g, '');
 }
 
 export function isAllAccountsScope(accountId) {
@@ -85,49 +101,130 @@ export function candidatesForAccount(candidates, accountId = '') {
   return list.filter((item) => candidateAccountId(item).toUpperCase() === wanted);
 }
 
-function masterDisplayName(account) {
-  const nama = text(account?.nama || account?.name);
-  if (nama) return nama;
+function masterLabelName(account) {
   return text(account?.label).replace(/^AKN_\d+\s*[-–:]\s*/i, '').trim();
 }
 
-function masterUsername(account) {
-  return text(account?.username || account?.Username || account?.userName).replace(/^@/, '');
+function masterDisplayName(account) {
+  const nama = text(account?.nama || account?.name);
+  if (nama) return nama;
+  return masterLabelName(account);
 }
 
 function replizUsername(account) {
   return text(account?.username).replace(/^@/, '');
 }
 
+function masterHandleKeys(account) {
+  const keys = new Set();
+  const add = (value) => {
+    const key = normalizeAccountHandle(value);
+    if (key) keys.add(key);
+  };
+  add(account?.username);
+  add(account?.Username);
+  add(account?.userName);
+  add(account?.handle);
+  add(account?.Handle);
+  add(account?.nama);
+  add(account?.name);
+  add(masterLabelName(account));
+  return keys;
+}
+
+function onlyMaster(masters, predicate) {
+  const hits = masters.filter(predicate);
+  return hits.length === 1 ? hits[0] : null;
+}
+
+function masterFromKnownHandle(masters, handleKey) {
+  const rule = KNOWN_HANDLE_OVERRIDES.find((item) => normalizeAccountHandle(item.handle) === handleKey);
+  if (!rule) return null;
+  const byId = onlyMaster(masters, (item) => text(item.id).toUpperCase() === text(rule.id).toUpperCase());
+  if (byId) return byId;
+  const namaKey = normalizeAccountHandle(rule.nama);
+  if (!namaKey) return null;
+  return onlyMaster(masters, (item) => masterHandleKeys(item).has(namaKey));
+}
+
+function linked(base, master, mode) {
+  return { ...base, masterId: text(master.id), master, mode };
+}
+
+function isManualSource(value) {
+  const source = text(value?.source || value?.mode).toLowerCase();
+  return value?.manual === true || source === 'manual';
+}
+
+function isAutoSource(value) {
+  const source = text(value?.source || value?.mode).toLowerCase();
+  return value?.manual === false || source === 'auto' || source.startsWith('auto-');
+}
+
+function manualMasterId(value) {
+  if (typeof value === 'string' || typeof value === 'number') return text(value);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return '';
+  const master = text(value.masterId ?? value.id ?? value.Id_Akun);
+  if (!master || (isAutoSource(value) && !isManualSource(value))) return '';
+  return master;
+}
+
+export function manualAccountMap(stored) {
+  const manual = {};
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return manual;
+  for (const [key, value] of Object.entries(stored)) {
+    const id = text(key);
+    const master = manualMasterId(value);
+    if (id && master) manual[id] = master;
+  }
+  return manual;
+}
+
+function autoAccountLink(account, masters) {
+  const replizId = text(account.id);
+  const name = text(account.name || account.nama);
+  const username = replizUsername(account);
+  const base = { replizId, name, username, masterId: '', master: null, mode: 'unlinked' };
+  const handleKey = normalizeAccountHandle(username);
+  if (handleKey) {
+    const known = masterFromKnownHandle(masters, handleKey);
+    if (known) return linked(base, known, 'auto-username');
+    const byHandle = masters.filter((item) => masterHandleKeys(item).has(handleKey));
+    if (byHandle.length === 1) return linked(base, byHandle[0], 'auto-username');
+    if (byHandle.length > 1) return base;
+  }
+  const nameKey = normalizeAccountName(name);
+  if (!nameKey) return base;
+  const byName = masters.filter((item) => normalizeAccountName(masterDisplayName(item)) === nameKey);
+  if (byName.length !== 1) return base;
+  return linked(base, byName[0], 'auto-name');
+}
+
+function cancelDuplicateAutos(links) {
+  const counts = new Map();
+  for (const link of links) {
+    if (!link.masterId) continue;
+    const id = link.masterId.toUpperCase();
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+  return links.map((link) => {
+    if (!link.masterId || link.mode === 'manual') return link;
+    if ((counts.get(link.masterId.toUpperCase()) || 0) < 2) return link;
+    return { ...link, masterId: '', master: null, mode: 'ambiguous' };
+  });
+}
+
 export function resolveAccountLinks(replizAccounts, masterAccounts, manualMap = {}) {
   const masters = (Array.isArray(masterAccounts) ? masterAccounts : []).filter((item) => item && text(item.id));
-  const manual = manualMap && typeof manualMap === 'object' && !Array.isArray(manualMap) ? manualMap : {};
-  return (Array.isArray(replizAccounts) ? replizAccounts : []).filter(Boolean).map((account) => {
-    const replizId = text(account.id);
-    const name = text(account.name || account.nama);
-    const username = replizUsername(account);
-    const base = { replizId, name, username, masterId: '', master: null, mode: 'unlinked' };
-    const manualId = text(manual[replizId]);
-    if (manualId) {
-      const master = masters.find((item) => text(item.id).toUpperCase() === manualId.toUpperCase()) || null;
-      return master
-        ? { ...base, masterId: text(master.id), master, mode: 'manual' }
-        : base;
-    }
-    const userKey = normalizeAccountName(username);
-    if (userKey) {
-      const byUser = masters.filter((item) => masterUsername(item) && normalizeAccountName(masterUsername(item)) === userKey);
-      if (byUser.length === 1) {
-        return { ...base, masterId: text(byUser[0].id), master: byUser[0], mode: 'auto-username' };
-      }
-      if (byUser.length > 1) return base;
-    }
-    const nameKey = normalizeAccountName(name);
-    if (!nameKey) return base;
-    const byName = masters.filter((item) => normalizeAccountName(masterDisplayName(item)) === nameKey);
-    if (byName.length !== 1) return base;
-    return { ...base, masterId: text(byName[0].id), master: byName[0], mode: 'auto-name' };
+  const manual = manualAccountMap(manualMap);
+  const resolved = (Array.isArray(replizAccounts) ? replizAccounts : []).filter(Boolean).map((account) => {
+    const auto = autoAccountLink(account, masters);
+    const manualId = text(manual[auto.replizId]);
+    if (!manualId) return auto;
+    const master = masters.find((item) => text(item.id).toUpperCase() === manualId.toUpperCase()) || null;
+    return master ? linked(auto, master, 'manual') : { ...auto, masterId: '', master: null, mode: 'unlinked' };
   });
+  return cancelDuplicateAutos(resolved);
 }
 
 export function summarizeAccountLinks(links) {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
   CAPTION_LIMIT,
+  KNOWN_HANDLE_OVERRIDES,
   REPLIZ_ACCOUNT_MAP_KEY,
   SEND_GAP_MS,
   appendPlanRows,
@@ -15,7 +16,9 @@ import {
   formatScheduleWib,
   isHeldName,
   isScheduleAt,
+  manualAccountMap,
   mediaExpiryUnix,
+  normalizeAccountHandle,
   planRowIssues,
   productChoiceLabel,
   productChoices,
@@ -385,7 +388,17 @@ const MASTERS = [
   { id: 'AKN_002', nama: 'Produk Andalan Kita', label: 'AKN_002 - Produk Andalan Kita' },
   { id: 'AKN_003', nama: 'Grosir Hitam', label: 'AKN_003 - Grosir Hitam' },
   { id: 'AKN_004', nama: 'Melifarida Toserba', label: 'AKN_004 - Melifarida Toserba' },
+  { id: 'AKN_005', nama: 'Pasar Digitals', label: 'AKN_005 - Pasar Digitals', pemegang: 'Rizal' },
   { id: 'AKN_006', nama: 'Hasil Seleksi', label: 'AKN_006 - Hasil Seleksi' },
+];
+
+const REPLIZ_ACCOUNTS = [
+  { id: 'r-pasar', name: 'MeliFarida Toserba', username: 'pasar.digital79' },
+  { id: 'r-hasil', name: 'Hasil Seleksi', username: 'meliycyko14' },
+  { id: 'r-grosir', name: 'Grosir Import Indonesia', username: 'grosirimportindonesia' },
+  { id: 'r-produk', name: 'Produk Andalan Kita', username: 'produkandalankita' },
+  { id: 'r-meli', name: 'Melifarida Toserba', username: 'melifarida_toserba' },
+  { id: 'r-kawat', name: 'Solusi Pembersih Saluran Air', username: 'jualkawatpembersihpipa' },
 ];
 
 function accountClips() {
@@ -463,35 +476,168 @@ describe('filter video per akun Repliz', () => {
     assert.equal(candidatesForAccount(clips, '__none__').length, 0);
   });
 
-  test('memetakan username dan nama yang yakin, tidak nama yang ragu', () => {
+  test('memetakan username dulu, lalu nama yang sama persis', () => {
     assert.equal(REPLIZ_ACCOUNT_MAP_KEY, 'promoops.replizAccountMap');
+    assert.equal(normalizeAccountHandle('@pasar.digital79'), 'pasardigital');
+    assert.equal(normalizeAccountHandle('Pasar Digitals'), 'pasardigitals');
+    assert.equal(normalizeAccountHandle('@melifarida_toserba'), 'melifaridatoserba');
+    assert.equal(KNOWN_HANDLE_OVERRIDES.find((item) => item.handle === 'pasar.digital79')?.id, 'AKN_005');
     const repliz = [
-      { id: 'r-hasil', name: 'Hasil Seleksi', username: 'meliycyko14' },
-      { id: 'r-meli', name: 'MeliFarida Toserba', username: 'pasar.digital79' },
-      { id: 'r-grosir', name: 'Grosir Import Indonesia', username: 'grosirimportindonesia' },
+      ...REPLIZ_ACCOUNTS,
       { id: 'r-toko', name: 'Toko Andalan', username: '' },
       { id: 'r-user', name: 'Nama Lain Sekali', username: '@jualkawat' },
     ];
     const links = resolveAccountLinks(repliz, MASTERS, {});
     const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-pasar'].mode, 'auto-username');
+    assert.equal(byId['r-pasar'].masterId, 'AKN_005');
+    assert.equal(byId['r-meli'].mode, 'auto-username');
+    assert.equal(byId['r-meli'].masterId, 'AKN_004');
+    assert.equal(byId['r-produk'].mode, 'auto-username');
+    assert.equal(byId['r-produk'].masterId, 'AKN_002');
     assert.equal(byId['r-hasil'].mode, 'auto-name');
     assert.equal(byId['r-hasil'].masterId, 'AKN_006');
-    assert.equal(byId['r-meli'].mode, 'auto-name');
-    assert.equal(byId['r-meli'].masterId, 'AKN_004');
     assert.equal(byId['r-user'].mode, 'auto-username');
     assert.equal(byId['r-user'].masterId, 'AKN_001');
     assert.equal(byId['r-grosir'].mode, 'unlinked');
     assert.equal(byId['r-grosir'].masterId, '');
+    assert.equal(byId['r-kawat'].mode, 'unlinked');
+    assert.equal(byId['r-kawat'].masterId, '');
     assert.equal(byId['r-toko'].mode, 'unlinked');
     assert.equal(byId['r-toko'].masterId, '');
     const summary = summarizeAccountLinks(links);
-    assert.deepEqual(summary, { auto: 3, manual: 0, unlinked: 2 });
+    assert.deepEqual(summary, { auto: 5, manual: 0, unlinked: 3 });
     const manual = resolveAccountLinks(repliz, MASTERS, { 'r-grosir': 'AKN_003', 'r-hasil': 'AKN_001' });
     const mapped = Object.fromEntries(manual.map((link) => [link.replizId, link]));
     assert.equal(mapped['r-grosir'].mode, 'manual');
     assert.equal(mapped['r-grosir'].masterId, 'AKN_003');
     assert.equal(mapped['r-hasil'].mode, 'manual');
     assert.equal(mapped['r-hasil'].masterId, 'AKN_001');
-    assert.equal(resolveAccountLinks(repliz, MASTERS, { 'r-toko': 'AKN_999' })[3].mode, 'unlinked');
+    assert.equal(mapped['r-pasar'].masterId, 'AKN_005');
+    const missing = resolveAccountLinks(repliz, MASTERS, { 'r-toko': 'AKN_999' });
+    assert.equal(missing.find((link) => link.replizId === 'r-toko').mode, 'unlinked');
+  });
+
+  test('handle yang dikenal tetap ke Pasar Digitals lewat nama bila Id_Akun berbeda', () => {
+    const links = resolveAccountLinks(
+      [{ id: 'r-pasar', name: 'MeliFarida Toserba', username: '@Pasar.Digital79' }],
+      [{ id: 'AKN_099', nama: 'Pasar Digitals', label: 'Toko lain' }],
+      {},
+    );
+    assert.equal(links[0].mode, 'auto-username');
+    assert.equal(links[0].masterId, 'AKN_099');
+  });
+
+  test('tanpa Pasar Digitals, nama tampilan yang sama persis tetap dipakai', () => {
+    const links = resolveAccountLinks(
+      [{ id: 'r-pasar', name: 'MeliFarida Toserba', username: 'pasar.digital79' }],
+      [{ id: 'AKN_004', nama: 'Melifarida Toserba', label: 'AKN_004 - Melifarida Toserba' }],
+      {},
+    );
+    assert.equal(links[0].mode, 'auto-name');
+    assert.equal(links[0].masterId, 'AKN_004');
+  });
+
+  test('dua akun otomatis ke Id_Akun yang sama dibatalkan, manual tidak dihapus', () => {
+    const twins = [
+      { id: 'r-a', name: 'Hasil Seleksi', username: 'toko.satu11' },
+      { id: 'r-b', name: 'Hasil Seleksi', username: 'toko.dua22' },
+      { id: 'r-produk', name: 'Produk Andalan Kita', username: 'produkandalankita' },
+    ];
+    const links = resolveAccountLinks(twins, MASTERS, {});
+    const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-a'].mode, 'ambiguous');
+    assert.equal(byId['r-a'].masterId, '');
+    assert.equal(byId['r-b'].mode, 'ambiguous');
+    assert.equal(byId['r-b'].masterId, '');
+    assert.equal(byId['r-produk'].masterId, 'AKN_002');
+    assert.deepEqual(summarizeAccountLinks(links), { auto: 1, manual: 0, unlinked: 2 });
+
+    const kept = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, { 'r-pasar': 'AKN_004' });
+    const manual = Object.fromEntries(kept.map((link) => [link.replizId, link]));
+    assert.equal(manual['r-pasar'].mode, 'manual');
+    assert.equal(manual['r-pasar'].masterId, 'AKN_004');
+    assert.equal(manual['r-meli'].mode, 'ambiguous');
+    assert.equal(manual['r-meli'].masterId, '');
+  });
+
+  test('peta manual lama tetap, sisa otomatis yang tersimpan diabaikan', () => {
+    const stored = {
+      'r-grosir': 'AKN_003',
+      'r-pasar': { masterId: 'AKN_004', manual: false },
+      'r-hasil': { masterId: 'AKN_002', source: 'auto-name' },
+      'r-meli': { masterId: 'AKN_001', manual: true },
+      'r-produk': { id: 'AKN_002' },
+    };
+    assert.deepEqual(manualAccountMap(stored), {
+      'r-grosir': 'AKN_003',
+      'r-meli': 'AKN_001',
+      'r-produk': 'AKN_002',
+    });
+    const links = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, stored);
+    const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-pasar'].mode, 'auto-username');
+    assert.equal(byId['r-pasar'].masterId, 'AKN_005');
+    assert.equal(byId['r-hasil'].mode, 'auto-name');
+    assert.equal(byId['r-hasil'].masterId, 'AKN_006');
+    assert.equal(byId['r-grosir'].mode, 'manual');
+    assert.equal(byId['r-grosir'].masterId, 'AKN_003');
+    assert.equal(byId['r-meli'].mode, 'manual');
+    assert.equal(byId['r-meli'].masterId, 'AKN_001');
+    assert.equal(byId['r-produk'].mode, 'manual');
+    assert.equal(byId['r-produk'].masterId, 'AKN_002');
+  });
+
+  test('kolom handle dan label MASTER_AKUN ikut dicocokkan, awalan yang mirip tidak', () => {
+    const links = resolveAccountLinks(
+      [
+        { id: 'r-x', name: 'Nama Bebas', username: '@toko.rahasia8' },
+        { id: 'r-label', name: 'Bukan nama produk', username: 'produk_andalan_kita' },
+        { id: 'r-kawat', name: 'Solusi Pembersih Saluran Air', username: 'jualkawatpembersihpipa' },
+      ],
+      [
+        { id: 'AKN_007', nama: 'Nama Master', handle: 'toko_rahasia8' },
+        { id: 'AKN_002', label: 'AKN_002 - Produk Andalan Kita' },
+        { id: 'AKN_001', nama: 'Jual Kawat', username: 'jualkawat' },
+      ],
+      {},
+    );
+    const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-x'].mode, 'auto-username');
+    assert.equal(byId['r-x'].masterId, 'AKN_007');
+    assert.equal(byId['r-label'].mode, 'auto-username');
+    assert.equal(byId['r-label'].masterId, 'AKN_002');
+    assert.equal(byId['r-kawat'].mode, 'unlinked');
+  });
+
+  test('filter video @pasar.digital79 memakai Id_Akun AKN_005', () => {
+    const links = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, {});
+    const pasar = links.find((link) => link.replizId === 'r-pasar');
+    const meli = links.find((link) => link.replizId === 'r-meli');
+    const clips = buildVideoCandidates({
+      klipVideos: [
+        { fileId: 'DRIVE!pasar', fileName: 'pasar.mp4', produk: 'Sapu', Id_Akun: 'AKN_005', Sumber: 'Klip_Vidio' },
+        { fileId: 'DRIVE!meli', fileName: 'meli.mp4', produk: 'Sapu', Id_Akun: 'AKN_004', Sumber: 'Klip_Vidio' },
+        { fileId: 'DRIVE!lain', fileName: 'lain.mp4', produk: 'Sapu', Id_Akun: 'AKN_002', Sumber: 'Klip_Vidio' },
+      ],
+    });
+    assert.equal(pasar.masterId, 'AKN_005');
+    const videos = filterCandidates(clips, { uploaded: 'semua', includeHeld: true, accountId: pasar.masterId });
+    assert.deepEqual(videos.map((item) => item.fileId), ['DRIVE!pasar']);
+    assert.deepEqual(
+      candidatesForAccount(clips, meli.masterId).map((item) => item.fileId),
+      ['DRIVE!meli'],
+    );
+    const quick = buildQuickRows({
+      candidates: clips,
+      product: 'Sapu',
+      count: 3,
+      startDate: '2026-11-21',
+      time: '19:00',
+      accountId: pasar.replizId,
+      idAkun: pasar.masterId,
+    });
+    assert.deepEqual(quick.rows.map((row) => row.fileId), ['DRIVE!pasar']);
+    assert.equal(quick.rows[0].accountId, 'r-pasar');
   });
 });
