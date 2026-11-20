@@ -1,6 +1,10 @@
 import { handleAppsScriptRequest } from './apps-script.js';
 import { handleGeminiRequest } from './gemini.js';
 import { handleOneDriveLoginRequest, handleOneDriveStreamRequest, handleOneDriveSyncRequest } from './onedrive.js';
+import { handleReplizAssetsRequest } from './repliz-assets.js';
+import { handleReplizMediaRequest } from './repliz-media.js';
+import { handleReplizPlanRequest } from './repliz-plan.js';
+import { handleReplizAccountsRequest, handleReplizScheduleRequest } from './repliz.js';
 import { handleTikTokResolveRequest } from './tiktok.js';
 
 const ROUTES = new Map([
@@ -10,6 +14,11 @@ const ROUTES = new Map([
   ['/api/onedrive-login', handleOneDriveLoginRequest],
   ['/api/onedrive-sync', handleOneDriveSyncRequest],
   ['/api/onedrive-stream', handleOneDriveStreamRequest],
+  ['/api/repliz-accounts', handleReplizAccountsRequest],
+  ['/api/repliz-schedule', handleReplizScheduleRequest],
+  ['/api/repliz-media', handleReplizMediaRequest],
+  ['/api/repliz-plan', handleReplizPlanRequest],
+  ['/api/repliz-assets', handleReplizAssetsRequest],
 ]);
 
 const SKIP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive']);

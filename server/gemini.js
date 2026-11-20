@@ -107,7 +107,7 @@ function usesGemini3Thinking(model) {
   return /^gemini-[3-9]/.test(model);
 }
 
-function generationConfigFor(model, temperature, maxOutputTokens) {
+export function generationConfigFor(model, temperature, maxOutputTokens) {
   const generationConfig = { maxOutputTokens };
   if (GEMINI_25_FLASH.test(model)) {
     generationConfig.temperature = temperature;

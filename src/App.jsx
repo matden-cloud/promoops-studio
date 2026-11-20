@@ -5,7 +5,7 @@ import {
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
-  Play, Smartphone, Package
+  Play, Smartphone, Package, CalendarClock
 } from 'lucide-react';
 import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
@@ -15,6 +15,7 @@ import { useOneDriveSync } from './useOneDriveSync.js';
 import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import RekapProdukPanel from './RekapProdukPanel.jsx';
+import JadwalReplizPanel from './JadwalReplizPanel.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
 import {
@@ -267,8 +268,21 @@ function FileLinkActions({ file, onPlay }) {
 }
 
 
+function navTabClass(active, tone = 'emerald') {
+  const base = 'whitespace-nowrap shrink-0 px-3 py-2.5 lg:px-3 lg:py-2 text-sm font-semibold rounded-md inline-flex items-center gap-1.5 border';
+  if (!active) {
+    return tone === 'red'
+      ? `${base} border-transparent bg-transparent text-gray-500 hover:text-red-600`
+      : `${base} border-transparent bg-transparent text-gray-500 hover:text-gray-700`;
+  }
+  if (tone === 'red') return `${base} border-red-200 bg-red-50 text-red-700 shadow-sm`;
+  if (tone === 'neutral') return `${base} border-gray-200 bg-white text-gray-900 shadow-sm`;
+  return `${base} border-emerald-200 bg-white text-emerald-700 shadow-sm`;
+}
+
 export default function App() {
-  const [activeMenu, setActiveMenu] = useState('pipeline'); 
+  const [activeMenu, setActiveMenu] = useState('pipeline');
+  const [jadwalMounted, setJadwalMounted] = useState(false); 
 
   // --- STATE DATA ASLI DARI GOOGLE SHEETS ---
   const [data, setData] = useState([]);
@@ -1991,8 +2005,8 @@ export default function App() {
       )}
 
       {/* HEADER NAVIGASI RESPONSIF */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col lg:flex-row items-center justify-between gap-4 sticky top-0 z-30 shadow-sm print:hidden">
-        <div className="flex items-center gap-3 w-full lg:w-auto justify-center lg:justify-start">
+      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col gap-3 sticky top-0 z-30 shadow-sm print:hidden lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center lg:gap-x-4 lg:gap-y-2.5">
+        <div className="flex items-center gap-3 w-full justify-center lg:col-start-1 lg:row-start-1 lg:w-auto lg:justify-self-start lg:justify-start">
           <div className="w-10 h-10 bg-emerald-700 text-white rounded-lg flex items-center justify-center font-bold text-lg shrink-0">RP</div>
           <div>
             <h1 className="font-bold text-gray-900 text-sm">PromoOps & Riset</h1>
@@ -2000,26 +2014,29 @@ export default function App() {
           </div>
         </div>
         
-        <div className="flex flex-wrap justify-center bg-gray-50 p-1 rounded-lg border border-gray-200 shadow-inner w-full lg:w-auto gap-1">
-          <button onClick={() => setActiveMenu('pipeline')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pipeline' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+        <div className="flex flex-wrap justify-center bg-gray-50 p-1 rounded-lg border border-gray-200 shadow-inner w-full gap-1 lg:col-span-2 lg:row-start-2 lg:flex-nowrap lg:justify-center">
+          <button type="button" onClick={() => setActiveMenu('pipeline')} className={navTabClass(activeMenu === 'pipeline')}>
             <LayoutDashboard className="w-4 h-4" /> Rekap & Pipeline
           </button>
-          <button onClick={() => setActiveMenu('analitik')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'analitik' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}>
+          <button type="button" onClick={() => setActiveMenu('analitik')} className={navTabClass(activeMenu === 'analitik', 'neutral')}>
             <BarChart2 className="w-4 h-4" /> Laporan FYP
           </button>
-          <button onClick={() => setActiveMenu('produk')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'produk' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+          <button type="button" onClick={() => setActiveMenu('produk')} className={navTabClass(activeMenu === 'produk')}>
             <Package className="w-4 h-4" /> Rekap Produk
           </button>
-          <button onClick={() => setActiveMenu('pelanggaran')} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'pelanggaran' ? 'bg-red-50 text-red-700 shadow-sm border border-red-200' : 'text-gray-500 hover:text-red-600'}`}>
+          <button type="button" onClick={() => setActiveMenu('pelanggaran')} className={navTabClass(activeMenu === 'pelanggaran', 'red')}>
             <ShieldAlert className="w-4 h-4" /> Pelanggaran ({violations.length})
           </button>
-          <button onClick={() => setActiveMenu('sinkron')} aria-busy={driveSync.syncing} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'sinkron' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+          <button type="button" onClick={() => setActiveMenu('sinkron')} aria-busy={driveSync.syncing} className={navTabClass(activeMenu === 'sinkron')}>
             <Bot className="w-4 h-4" /> Sinkron Bot
             {driveSync.syncing && <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" aria-hidden="true" />}
           </button>
+          <button type="button" onClick={() => { setJadwalMounted(true); setActiveMenu('jadwal'); }} className={navTabClass(activeMenu === 'jadwal')}>
+            <CalendarClock className="w-4 h-4" /> Jadwal Repliz
+          </button>
         </div>
 
-        <div className="flex items-center justify-center gap-2 w-full lg:w-auto">
+        <div className="flex items-center justify-center gap-2 w-full lg:col-start-2 lg:row-start-1 lg:w-auto lg:justify-self-end">
           <button 
             onClick={fetchData}
             disabled={loading}
@@ -3227,6 +3244,16 @@ export default function App() {
             needsLogin={driveSync.needsLogin}
             startSync={driveSync.startSync}
             dismissChangelog={driveSync.dismissChangelog}
+          />
+        </div>
+      )}
+
+      {jadwalMounted && (
+        <div className={activeMenu === 'jadwal' ? '' : 'hidden'}>
+          <JadwalReplizPanel
+            klipVideos={klipVideos}
+            publishVideos={publishVideos}
+            dataViews={data}
           />
         </div>
       )}
