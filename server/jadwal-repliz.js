@@ -56,6 +56,90 @@ export function normName(value) {
     .trim();
 }
 
+export const REPLIZ_ACCOUNT_MAP_KEY = 'promoops.replizAccountMap';
+
+export function normalizeAccountName(value) {
+  return text(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export function isAllAccountsScope(accountId) {
+  const value = text(accountId);
+  if (!value) return true;
+  const key = normalizeAccountName(value);
+  return key === 'semua' || key === 'semua akun' || key === 'all';
+}
+
+export function candidateAccountId(item) {
+  return text(item?.Id_Akun || item?.akunTarget);
+}
+
+export function candidatesForAccount(candidates, accountId = '') {
+  const list = (Array.isArray(candidates) ? candidates : []).filter(Boolean);
+  if (isAllAccountsScope(accountId)) return list;
+  const wanted = text(accountId).toUpperCase();
+  return list.filter((item) => candidateAccountId(item).toUpperCase() === wanted);
+}
+
+function masterDisplayName(account) {
+  const nama = text(account?.nama || account?.name);
+  if (nama) return nama;
+  return text(account?.label).replace(/^AKN_\d+\s*[-–:]\s*/i, '').trim();
+}
+
+function masterUsername(account) {
+  return text(account?.username || account?.Username || account?.userName).replace(/^@/, '');
+}
+
+function replizUsername(account) {
+  return text(account?.username).replace(/^@/, '');
+}
+
+export function resolveAccountLinks(replizAccounts, masterAccounts, manualMap = {}) {
+  const masters = (Array.isArray(masterAccounts) ? masterAccounts : []).filter((item) => item && text(item.id));
+  const manual = manualMap && typeof manualMap === 'object' && !Array.isArray(manualMap) ? manualMap : {};
+  return (Array.isArray(replizAccounts) ? replizAccounts : []).filter(Boolean).map((account) => {
+    const replizId = text(account.id);
+    const name = text(account.name || account.nama);
+    const username = replizUsername(account);
+    const base = { replizId, name, username, masterId: '', master: null, mode: 'unlinked' };
+    const manualId = text(manual[replizId]);
+    if (manualId) {
+      const master = masters.find((item) => text(item.id).toUpperCase() === manualId.toUpperCase()) || null;
+      return master
+        ? { ...base, masterId: text(master.id), master, mode: 'manual' }
+        : base;
+    }
+    const userKey = normalizeAccountName(username);
+    if (userKey) {
+      const byUser = masters.filter((item) => masterUsername(item) && normalizeAccountName(masterUsername(item)) === userKey);
+      if (byUser.length === 1) {
+        return { ...base, masterId: text(byUser[0].id), master: byUser[0], mode: 'auto-username' };
+      }
+      if (byUser.length > 1) return base;
+    }
+    const nameKey = normalizeAccountName(name);
+    if (!nameKey) return base;
+    const byName = masters.filter((item) => normalizeAccountName(masterDisplayName(item)) === nameKey);
+    if (byName.length !== 1) return base;
+    return { ...base, masterId: text(byName[0].id), master: byName[0], mode: 'auto-name' };
+  });
+}
+
+export function summarizeAccountLinks(links) {
+  const summary = { auto: 0, manual: 0, unlinked: 0 };
+  for (const link of Array.isArray(links) ? links : []) {
+    if (link?.mode === 'manual') summary.manual += 1;
+    else if (link?.mode === 'auto-name' || link?.mode === 'auto-username') summary.auto += 1;
+    else summary.unlinked += 1;
+  }
+  return summary;
+}
+
 export function isHeldName(value) {
   const spaced = ` ${normName(value)} `;
   return /(?:^|\s)(?:gantungan|gntungan)\s+bor(?:\s|$)/.test(spaced);
@@ -313,6 +397,9 @@ export function buildVideoCandidates({
       date: normalizeIsoDate(klip.date || klip.Tanggal_Selesai || ''),
       schedulable,
       note: schedulable ? '' : MISSING_FILE_ID_NOTE,
+      Id_Akun: text(klip.Id_Akun || klip.idAkun),
+      akunTarget: text(klip.akunTarget),
+      Sumber: text(klip.Sumber || klip.sumber),
     });
   });
   return candidates;
@@ -361,14 +448,18 @@ export function filterCandidates(candidates, {
   includeHeld = false,
   product = '',
   query = '',
+  accountId = '',
 } = {}) {
   const productKey = normName(product);
   const needle = normName(query);
+  const limitAccount = !isAllAccountsScope(accountId);
+  const wantedAccount = text(accountId).toUpperCase();
   return (candidates || []).filter((item) => {
     if (!item) return false;
     if (uploaded === 'belum' && item.uploaded) return false;
     if (uploaded === 'sudah' && !item.uploaded) return false;
     if (!includeHeld && item.held) return false;
+    if (limitAccount && candidateAccountId(item).toUpperCase() !== wantedAccount) return false;
     if (productKey && productKey !== 'semua' && normName(productNameOf(item)) !== productKey) return false;
     if (needle && !normName(`${item.fileName} ${productNameOf(item)}`).includes(needle)) return false;
     return true;
@@ -447,6 +538,7 @@ export function buildQuickRows({
   startDate,
   time,
   accountId,
+  idAkun = '',
   existing = [],
 } = {}) {
   const total = Number(count);
@@ -469,6 +561,7 @@ export function buildQuickRows({
     uploaded: 'belum',
     includeHeld: false,
     product,
+    accountId: idAkun,
   })).filter((item) => item.schedulable !== false && item.fileId && !taken.has(item.fileId));
   const rows = [];
   for (let index = 0; index < Math.min(total, pool.length); index += 1) {
