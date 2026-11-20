@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import {
   CAPTION_LIMIT,
+  REPLIZ_ACCOUNT_MAP_KEY,
   SEND_GAP_MS,
   appendPlanRows,
   buildQuickRows,
   buildVideoCandidates,
+  candidateAccountId,
+  candidatesForAccount,
   candidatesForPlanner,
   filterCandidates,
   formatPlanDate,
@@ -16,7 +19,9 @@ import {
   planRowIssues,
   productChoiceLabel,
   productChoices,
+  resolveAccountLinks,
   scheduleStatusView,
+  summarizeAccountLinks,
   summarizeReplizStatus,
   summarizeVideoStock,
   toScheduleAt,
@@ -372,5 +377,121 @@ describe('sumber Klip_Vidio, stok, dan status Repliz', () => {
     });
     assert.deepEqual(summary, { pending: 12, process: 3, success: 40, error: 2 });
     assert.equal(summarizeReplizStatus({ pending: { schedules: [{}, {}, {}] } }).pending, 0);
+  });
+});
+
+const MASTERS = [
+  { id: 'AKN_001', nama: 'Jual Kawat', label: 'AKN_001 - Jual Kawat', username: 'jualkawat' },
+  { id: 'AKN_002', nama: 'Produk Andalan Kita', label: 'AKN_002 - Produk Andalan Kita' },
+  { id: 'AKN_003', nama: 'Grosir Hitam', label: 'AKN_003 - Grosir Hitam' },
+  { id: 'AKN_004', nama: 'Melifarida Toserba', label: 'AKN_004 - Melifarida Toserba' },
+  { id: 'AKN_006', nama: 'Hasil Seleksi', label: 'AKN_006 - Hasil Seleksi' },
+];
+
+function accountClips() {
+  return buildVideoCandidates({
+    klipVideos: [
+      { fileId: 'DRIVE!akn6-a', fileName: 'perata a.mp4', produk: 'Perata Keramik', Id_Akun: 'AKN_006', akunTarget: 'AKN_004', Sumber: 'Klip_Vidio' },
+      { fileId: 'DRIVE!akn6-b', fileName: 'perata b.mp4', produk: 'Perata Keramik', Id_Akun: 'AKN_006', Sumber: 'Klip_Vidio' },
+      { fileId: 'DRIVE!akn4', fileName: 'grease.mp4', produk: 'Suntikan Grease', akunTarget: 'AKN_004', Sumber: 'Publish' },
+      { fileId: 'DRIVE!bare', fileName: 'tanpa akun.mp4', produk: 'Perata Keramik', Sumber: 'Klip_Vidio' },
+    ],
+  });
+}
+
+describe('filter video per akun Repliz', () => {
+  test('meneruskan Id_Akun, akunTarget, dan Sumber', () => {
+    const clips = accountClips();
+    const first = clips.find((item) => item.fileId === 'DRIVE!akn6-a');
+    assert.equal(first.Id_Akun, 'AKN_006');
+    assert.equal(first.akunTarget, 'AKN_004');
+    assert.equal(first.Sumber, 'Klip_Vidio');
+    assert.equal(candidateAccountId(first), 'AKN_006');
+    const targetOnly = clips.find((item) => item.fileId === 'DRIVE!akn4');
+    assert.equal(targetOnly.Id_Akun, '');
+    assert.equal(targetOnly.akunTarget, 'AKN_004');
+    assert.equal(targetOnly.Sumber, 'Publish');
+    assert.equal(candidateAccountId(targetOnly), 'AKN_004');
+    const bare = clips.find((item) => item.fileId === 'DRIVE!bare');
+    assert.equal(bare.Id_Akun, '');
+    assert.equal(bare.akunTarget, '');
+    assert.equal(bare.Sumber, 'Klip_Vidio');
+    assert.equal(candidateAccountId(bare), '');
+  });
+
+  test('filter dan hitungan hanya untuk akun yang dipilih', () => {
+    const clips = accountClips();
+    const scoped = filterCandidates(clips, { uploaded: 'semua', includeHeld: true, accountId: 'AKN_006' });
+    assert.deepEqual(scoped.map((item) => item.fileId), ['DRIVE!akn6-a', 'DRIVE!akn6-b']);
+    const stock = summarizeVideoStock(candidatesForAccount(clips, 'akn_006'));
+    assert.deepEqual(stock, { total: 2, uploaded: 0, belum: 2 });
+    const choices = productChoices(candidatesForAccount(clips, 'AKN_006'));
+    assert.equal(choices.length, 1);
+    assert.equal(choices[0].name, 'Perata Keramik');
+    assert.equal(productChoiceLabel(choices[0]), 'Perata Keramik (2 belum / 2 total)');
+    const quick = buildQuickRows({
+      candidates: clips,
+      product: 'Perata Keramik',
+      count: 5,
+      startDate: '2026-11-21',
+      time: '19:00',
+      accountId: 'repliz-hasil',
+      idAkun: 'AKN_006',
+    });
+    assert.equal(quick.rows.length, 2);
+    assert.deepEqual(quick.rows.map((row) => row.fileId), ['DRIVE!akn6-a', 'DRIVE!akn6-b']);
+    assert.ok(quick.rows.every((row) => row.accountId === 'repliz-hasil'));
+    assert.equal(buildQuickRows({
+      candidates: clips,
+      product: 'Perata Keramik',
+      count: 2,
+      startDate: '2026-11-21',
+      time: '19:00',
+      accountId: 'repliz-lain',
+      idAkun: 'AKN_004',
+    }).rows.length, 0);
+  });
+
+  test('klip tanpa akun hanya tampil di Semua akun', () => {
+    const clips = accountClips();
+    const semua = filterCandidates(clips, { uploaded: 'semua', includeHeld: true, accountId: 'Semua akun' });
+    assert.equal(semua.length, 4);
+    assert.equal(candidatesForAccount(clips, '').some((item) => item.fileId === 'DRIVE!bare'), true);
+    assert.equal(candidatesForAccount(clips, 'Semua').some((item) => item.fileId === 'DRIVE!bare'), true);
+    const scoped = filterCandidates(clips, { uploaded: 'semua', includeHeld: true, accountId: 'AKN_006' });
+    assert.equal(scoped.some((item) => !candidateAccountId(item)), false);
+    assert.equal(candidatesForAccount(clips, '__none__').length, 0);
+  });
+
+  test('memetakan username dan nama yang yakin, tidak nama yang ragu', () => {
+    assert.equal(REPLIZ_ACCOUNT_MAP_KEY, 'promoops.replizAccountMap');
+    const repliz = [
+      { id: 'r-hasil', name: 'Hasil Seleksi', username: 'meliycyko14' },
+      { id: 'r-meli', name: 'MeliFarida Toserba', username: 'pasar.digital79' },
+      { id: 'r-grosir', name: 'Grosir Import Indonesia', username: 'grosirimportindonesia' },
+      { id: 'r-toko', name: 'Toko Andalan', username: '' },
+      { id: 'r-user', name: 'Nama Lain Sekali', username: '@jualkawat' },
+    ];
+    const links = resolveAccountLinks(repliz, MASTERS, {});
+    const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-hasil'].mode, 'auto-name');
+    assert.equal(byId['r-hasil'].masterId, 'AKN_006');
+    assert.equal(byId['r-meli'].mode, 'auto-name');
+    assert.equal(byId['r-meli'].masterId, 'AKN_004');
+    assert.equal(byId['r-user'].mode, 'auto-username');
+    assert.equal(byId['r-user'].masterId, 'AKN_001');
+    assert.equal(byId['r-grosir'].mode, 'unlinked');
+    assert.equal(byId['r-grosir'].masterId, '');
+    assert.equal(byId['r-toko'].mode, 'unlinked');
+    assert.equal(byId['r-toko'].masterId, '');
+    const summary = summarizeAccountLinks(links);
+    assert.deepEqual(summary, { auto: 3, manual: 0, unlinked: 2 });
+    const manual = resolveAccountLinks(repliz, MASTERS, { 'r-grosir': 'AKN_003', 'r-hasil': 'AKN_001' });
+    const mapped = Object.fromEntries(manual.map((link) => [link.replizId, link]));
+    assert.equal(mapped['r-grosir'].mode, 'manual');
+    assert.equal(mapped['r-grosir'].masterId, 'AKN_003');
+    assert.equal(mapped['r-hasil'].mode, 'manual');
+    assert.equal(mapped['r-hasil'].masterId, 'AKN_001');
+    assert.equal(resolveAccountLinks(repliz, MASTERS, { 'r-toko': 'AKN_999' })[3].mode, 'unlinked');
   });
 });

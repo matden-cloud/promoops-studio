@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Send, Sparkles, X } from 'lucide-react';
 import {
   CAPTION_LIMIT,
+  REPLIZ_ACCOUNT_MAP_KEY,
   REPLIZ_STATUS_COUNTS,
   SCHEDULE_STATUS_FILTERS,
   SEND_GAP_MS,
@@ -9,6 +10,8 @@ import {
   appendPlanRows,
   buildQuickRows,
   buildVideoCandidates,
+  candidateAccountId,
+  candidatesForAccount,
   candidatesForPlanner,
   clearDraftPlan,
   createPlanRow,
@@ -21,7 +24,9 @@ import {
   productChoiceLabel,
   productChoices,
   removePlanRow,
+  resolveAccountLinks,
   scheduleStatusView,
+  summarizeAccountLinks,
   summarizeReplizStatus,
   summarizeVideoStock,
   toScheduleAt,
@@ -91,6 +96,28 @@ function accountLabel(account) {
   return account.username ? `${name} (@${account.username})` : name;
 }
 
+function readAccountMap() {
+  try {
+    if (typeof localStorage === 'undefined') return {};
+    const parsed = JSON.parse(localStorage.getItem(REPLIZ_ACCOUNT_MAP_KEY) || '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const clean = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      const id = String(key || '').trim();
+      const master = String(value || '').trim();
+      if (id && master) clean[id] = master;
+    }
+    return clean;
+  } catch {
+    return {};
+  }
+}
+
+function masterOptionLabel(account) {
+  const nama = account?.nama || account?.name || account?.label || account?.id;
+  return `${account.id} · ${nama}`;
+}
+
 function UnlinkedProductHint({ choices }) {
   if (!choices?.some((item) => item.name === 'Tanpa produk')) return null;
   return (
@@ -100,12 +127,80 @@ function UnlinkedProductHint({ choices }) {
   );
 }
 
-function StockStat({ label, value, tone }) {
+function StockStat({ label, value, tone, shortLabel }) {
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{label}</p>
+      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
+        {shortLabel ? (
+          <>
+            <span className="lg:hidden">{shortLabel}</span>
+            <span className="hidden lg:inline">{label}</span>
+          </>
+        ) : label}
+      </p>
       <p className={`mt-1 text-2xl font-black leading-none ${tone}`}>{value}</p>
     </div>
+  );
+}
+
+function AccountMapCard({ links, summary, masters, onMap }) {
+  if (!links.length) return null;
+  return (
+    <section className="order-2 mb-5 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[15px] font-bold text-gray-900">Pemetaan akun Repliz ke MASTER_AKUN</h3>
+          <p className="mt-1 text-xs text-gray-500">Cocok nama yang yakin dipasangkan otomatis. Yang ragu diatur di sini, disimpan di browser — bukan di Sheets.</p>
+        </div>
+        <p className="rounded-full border border-sky-100 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800">
+          {summary.auto} otomatis · {summary.manual} manual · {summary.unlinked} belum
+        </p>
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+        {links.map((link) => {
+          const auto = link.mode === 'auto-name' || link.mode === 'auto-username';
+          const tone = auto
+            ? 'border-emerald-100 bg-emerald-50/60'
+            : link.mode === 'manual'
+              ? 'border-indigo-100 bg-indigo-50/50'
+              : 'border-amber-200 bg-amber-50';
+          const kicker = auto ? 'text-emerald-700' : link.mode === 'manual' ? 'text-indigo-700' : 'text-amber-800';
+          const detail = auto ? 'text-emerald-800' : 'text-indigo-800';
+          const label = link.mode === 'auto-username' || link.mode === 'auto-name'
+            ? 'Otomatis'
+            : link.mode === 'manual'
+              ? 'Manual (localStorage)'
+              : 'Belum terhubung';
+          return (
+            <div key={link.replizId} className={`rounded-xl border px-3 py-2.5 ${tone}`}>
+              <p className={`text-[10px] font-extrabold uppercase tracking-wide ${kicker}`}>{label}</p>
+              <p className="mt-1 text-sm font-bold text-gray-900">
+                {link.name || 'Akun TikTok'}
+                {link.username && <span className="font-semibold text-gray-500"> (@{link.username})</span>}
+              </p>
+              {link.masterId && (
+                <p className={`text-xs font-semibold ${detail}`}>→ {link.masterId} · {link.master?.nama || link.master?.name || link.master?.label}</p>
+              )}
+              {!auto && (
+                <label className="mt-1.5 block">
+                  <span className="sr-only">Petakan {link.name || 'akun'} ke Id_Akun</span>
+                  <select
+                    value={link.mode === 'manual' ? link.masterId : ''}
+                    onChange={(event) => onMap(link.replizId, event.target.value)}
+                    className="w-full rounded-lg border border-amber-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700"
+                  >
+                    <option value="">Pilih Id_Akun…</option>
+                    {masters.map((account) => (
+                      <option key={account.id} value={account.id}>{masterOptionLabel(account)}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -116,7 +211,7 @@ const STATUS_TONE = {
   error: 'text-red-700',
 };
 
-export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [], dataViews = [] }) {
+export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [], dataViews = [], masterAccounts = [] }) {
   const [accounts, setAccounts] = useState([]);
   const [missing, setMissing] = useState([]);
   const [configMessage, setConfigMessage] = useState('');
@@ -159,6 +254,8 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     accountId: '',
   });
   const [quickNote, setQuickNote] = useState('');
+  const [scopeReplizId, setScopeReplizId] = useState('');
+  const [manualMap, setManualMap] = useState(readAccountMap);
   const [videoQuery, setVideoQuery] = useState('');
   const [videoProduct, setVideoProduct] = useState('Semua');
   const [showUploaded, setShowUploaded] = useState(false);
@@ -175,17 +272,40 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     dataViews,
   }), [fileAssets, klipVideos, publishVideos, dataViews]);
 
-  const stock = useMemo(() => summarizeVideoStock(candidates), [candidates]);
-  const products = useMemo(() => productChoices(candidates), [candidates]);
+  const accountLinks = useMemo(
+    () => resolveAccountLinks(accounts, masterAccounts, manualMap),
+    [accounts, masterAccounts, manualMap],
+  );
+  const linkSummary = useMemo(() => summarizeAccountLinks(accountLinks), [accountLinks]);
+  const scopeLink = accountLinks.find((link) => link.replizId === scopeReplizId) || null;
+  const scopeFilter = !scopeReplizId ? '' : (scopeLink?.masterId || '__none__');
+  const scopedCandidates = useMemo(
+    () => candidatesForAccount(candidates, scopeFilter),
+    [candidates, scopeFilter],
+  );
+  const unassignedClips = useMemo(
+    () => candidates.filter((item) => !candidateAccountId(item)).length,
+    [candidates],
+  );
+  const stock = useMemo(() => summarizeVideoStock(scopedCandidates), [scopedCandidates]);
+  const products = useMemo(() => productChoices(scopedCandidates), [scopedCandidates]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(REPLIZ_ACCOUNT_MAP_KEY, JSON.stringify(manualMap));
+    } catch {
+      /* penyimpanan browser tidak tersedia */
+    }
+  }, [manualMap]);
   const manualProducts = useMemo(() => products.filter((choice) => (
-    candidates.some((item) => {
+    scopedCandidates.some((item) => {
       const name = item.product || 'Tanpa produk';
       if (name !== choice.name) return false;
       if (!showUploaded && item.uploaded) return false;
       if (!showHeld && item.held) return false;
       return true;
     })
-  )), [products, candidates, showUploaded, showHeld]);
+  )), [products, scopedCandidates, showUploaded, showHeld]);
   const videoProductActive = videoProduct === 'Semua' || manualProducts.some((item) => item.name === videoProduct)
     ? videoProduct
     : 'Semua';
@@ -194,7 +314,8 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     includeHeld: showHeld,
     product: videoProductActive,
     query: videoQuery,
-  }), [candidates, showUploaded, showHeld, videoProductActive, videoQuery]);
+    accountId: scopeFilter,
+  }), [candidates, showUploaded, showHeld, videoProductActive, videoQuery, scopeFilter]);
 
   const applySchedules = useCallback((result, response) => {
     if (!result) {
@@ -311,9 +432,8 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     return () => controller.abort();
   }, [applySchedules, loadReplizStatus]);
 
-  const defaultAccountId = accounts.find((item) => item.connected)?.id || accounts[0]?.id || '';
-  const manualAccountId = manual.accountId || defaultAccountId;
-  const quickAccountId = quick.accountId || defaultAccountId;
+  const manualAccountId = scopeReplizId;
+  const quickAccountId = scopeReplizId;
 
   useEffect(() => {
     if (!chatRef.current) return;
@@ -349,7 +469,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
         body: JSON.stringify({
           message: text,
           history,
-          candidates: candidatesForPlanner(candidates),
+          candidates: candidatesForPlanner(scopedCandidates),
           accounts: accounts.map((item) => ({ id: item.id, name: item.name, username: item.username })),
           currentPlan: planRows.filter((row) => row.sendState !== 'sent').map((row) => ({
             fileId: row.fileId,
@@ -441,6 +561,14 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
 
   function fillQuick(event) {
     event.preventDefault();
+    if (!scopeReplizId) {
+      setQuickNote('Pilih akun Repliz dulu.');
+      return;
+    }
+    if (!scopeLink?.masterId) {
+      setQuickNote('Akun ini belum terhubung ke MASTER_AKUN. Atur pemetaannya, atau pilih Semua akun.');
+      return;
+    }
     const result = buildQuickRows({
       candidates,
       product: quick.product,
@@ -448,6 +576,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
       startDate: quick.startDate,
       time: quick.time,
       accountId: quickAccountId,
+      idAkun: scopeFilter,
       existing: planRows,
     });
     if (!result.rows.length) {
@@ -551,22 +680,49 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     : (pendingRows.length ? 'Belum dikirim — menunggu konfirmasi' : 'Terkirim');
 
   return (
-    <div id="jadwal-repliz" className="mx-auto max-w-[1400px] p-4 md:p-8">
-      <div className="mb-5">
+    <div id="jadwal-repliz" className="mx-auto flex max-w-[1400px] flex-col p-4 md:p-8 lg:block">
+      <div className="order-1 mb-5 hidden lg:block">
         <h2 className="text-2xl font-bold text-gray-900">Jadwal Repliz</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Jadwalkan video dari tab Klip_Vidio lewat asisten atau form. <strong className="font-semibold text-gray-700">Tidak ada yang dikirim</strong> sebelum tombol <strong className="font-semibold text-gray-700">Konfirmasi & kirim ke Repliz</strong> ditekan.
+          Pilih <strong className="font-semibold text-gray-700">Akun Repliz</strong> dulu, lalu produk dan video menyesuaikan akun itu. <strong className="font-semibold text-gray-700">Tidak ada yang dikirim</strong> sebelum tombol <strong className="font-semibold text-gray-700">Konfirmasi & kirim ke Repliz</strong> ditekan.
         </p>
       </div>
 
-      <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <AccountMapCard
+        links={accountLinks}
+        summary={linkSummary}
+        masters={masterAccounts}
+        onMap={(replizId, masterId) => {
+          setManualMap((current) => {
+            const next = { ...current };
+            if (!masterId) delete next[replizId];
+            else next[replizId] = masterId;
+            return next;
+          });
+        }}
+      />
+
+      <div className="order-3 mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" data-testid="stock-summary">
           <h3 className="text-[15px] font-bold text-gray-900">Video Final</h3>
+          {scopeReplizId && scopeLink?.masterId && (
+            <p className="mt-1 text-[11px] font-semibold text-emerald-700">Untuk akun {scopeLink.name} · {scopeLink.masterId}</p>
+          )}
+          {scopeReplizId && !scopeLink?.masterId && (
+            <p className="mt-1 text-[11px] font-semibold text-amber-800">Akun ini belum terhubung ke MASTER_AKUN.</p>
+          )}
           <div className="mt-3 grid grid-cols-3 gap-2">
             <StockStat label="Total" value={stock.total} tone="text-gray-900" />
-            <StockStat label="Sudah diupload" value={stock.uploaded} tone="text-emerald-700" />
-            <StockStat label="Belum diupload" value={stock.belum} tone="text-amber-700" />
+            <StockStat label="Sudah diupload" value={stock.uploaded} tone="text-emerald-700" shortLabel="Sudah" />
+            <StockStat label="Belum diupload" value={stock.belum} tone="text-amber-700" shortLabel="Belum" />
           </div>
+          {unassignedClips > 0 && (
+            <p className="mt-3 text-[11px] font-semibold text-gray-400">
+              {scopeReplizId
+                ? `${unassignedClips} klip tanpa Id_Akun hanya tampil di “Semua akun”.`
+                : `${unassignedClips} klip tanpa Id_Akun ikut di Semua akun.`}
+            </p>
+          )}
           <p className="mt-3 text-[11px] font-semibold text-gray-400">Sumber: tab Klip_Vidio · status dari data publish</p>
         </section>
 
@@ -587,7 +743,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
               Refresh
             </button>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="mt-3 grid grid-cols-4 gap-2">
             {REPLIZ_STATUS_COUNTS.map((item) => {
               const value = statusMode === 'ready' && statusCounts ? statusCounts[item.id] : (statusMode === 'loading' ? '…' : '—');
               return (
@@ -610,17 +766,17 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
       </div>
 
       {missing.length > 0 && (
-        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="repliz-config-banner">
+        <div className="order-4 mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" data-testid="repliz-config-banner">
           <p className="font-bold">Konfigurasi Repliz belum lengkap</p>
           <p className="mt-1">{configMessage || 'Isi variabel berikut di Vercel, lalu deploy ulang. Penyusunan draf tetap bisa dilakukan.'}</p>
           <p className="mt-2 font-semibold">{missing.join(', ')}</p>
         </div>
       )}
       {accountError && !missing.length && (
-        <p className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{accountError}</p>
+        <p className="order-4 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{accountError}</p>
       )}
 
-      <section className="mb-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <section className="order-7 mb-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="flex items-center gap-3 border-b border-gray-100 px-4 py-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-50 text-purple-600">
             <Sparkles className="h-5 w-5" />
@@ -668,7 +824,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
         <p className="px-4 pb-3 text-[11px] font-semibold text-gray-400">Asisten hanya mengisi tabel. Chat tidak mengirim jadwal ke Repliz.</p>
       </section>
 
-      <section className="mb-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <section className="order-6 mb-5 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h3 className="text-[15px] font-bold text-gray-900">Rencana jadwal — periksa sebelum dikirim</h3>
@@ -681,7 +837,35 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
           )}
         </div>
         {planRows.length > 0 && (
-          <div className="overflow-x-auto">
+          <>
+          <div className="divide-y divide-gray-100 lg:hidden">
+            {planRows.map((row) => (
+              <div key={`m-${row.localId}`} className="space-y-2 px-4 py-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="break-all text-xs font-semibold text-gray-800">{row.fileName}</p>
+                    <p className="mt-0.5 text-[11px] font-semibold text-gray-500">{row.product || '—'} · {formatPlanDate(row.date)}</p>
+                    {row.held && <div className="mt-1"><HoldBadge /></div>}
+                    {row.sendState === 'sent' && <p className="mt-1 text-[11px] font-bold text-emerald-700">Terkirim</p>}
+                    {row.sendState === 'failed' && <p className="mt-1 text-[11px] font-semibold text-red-700">{row.error}</p>}
+                  </div>
+                  <button type="button" aria-label="Hapus baris" disabled={sending || row.sendState === 'sending'} onClick={() => setPlanRows((current) => removePlanRow(current, row.localId))} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-gray-200 text-gray-500 disabled:opacity-40">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                <select aria-label="Akun Repliz pada rencana" value={row.accountId} disabled={sending || row.sendState === 'sent'} onChange={(event) => patchRow(row.localId, { accountId: event.target.value })} className="w-full rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs font-semibold">
+                  <option value="">Pilih akun</option>
+                  {accounts.map((account) => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
+                </select>
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="date" aria-label="Tanggal rencana" value={row.date} disabled={sending || row.sendState === 'sent'} onChange={(event) => patchRow(row.localId, { date: event.target.value })} className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs font-bold" />
+                  <input type="time" aria-label="Jam rencana" value={row.time} disabled={sending || row.sendState === 'sent'} onChange={(event) => patchRow(row.localId, { time: event.target.value })} className="rounded-lg border border-gray-200 px-2 py-1.5 text-xs font-bold text-emerald-700" />
+                </div>
+                <textarea aria-label="Caption rencana" value={row.caption} disabled={sending || row.sendState === 'sent'} onChange={(event) => patchRow(row.localId, { caption: event.target.value })} rows={2} className="w-full rounded-lg border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700" />
+              </div>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto lg:block">
             <table className="w-full min-w-[920px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-y border-gray-200 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
@@ -736,6 +920,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
               </tbody>
             </table>
           </div>
+          </>
         )}
         <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-semibold text-gray-500">Tidak ada yang dikirim tanpa tombol Konfirmasi.</p>
@@ -748,10 +933,10 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
         </div>
       </section>
 
-      <div className="mb-5 grid grid-cols-1 gap-4 xl:grid-cols-5">
+      <div className="order-5 mb-5 grid grid-cols-1 gap-4 xl:grid-cols-5">
         <form onSubmit={addManual} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm xl:col-span-3">
           <h3 className="text-[15px] font-bold">Jadwal manual</h3>
-          <p className="mb-3 text-xs text-gray-500">Pilih satu video final, lalu isi akun, waktu, dan caption.</p>
+          <p className="mb-3 text-xs text-gray-500">Akun dulu, lalu filter produk, lalu video milik akun itu.</p>
           <div className="mb-3">
             <input value={videoQuery} onChange={(event) => setVideoQuery(event.target.value)} placeholder="Cari nama file" className={controlClass} aria-label="Cari video" />
           </div>
@@ -760,14 +945,29 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             <CheckOption checked={showHeld} onChange={(event) => setShowHeld(event.target.checked)}>Tampilkan yang ditahan</CheckOption>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Filter produk" className="sm:col-span-2">
+            <Field label="1. Akun Repliz" className="sm:col-span-2">
+              <select value={scopeReplizId} onChange={(event) => setScopeReplizId(event.target.value)} className={`${controlClass} ${scopeReplizId ? 'border-emerald-300 bg-emerald-50/40 ring-2 ring-emerald-100' : ''}`} aria-label="Akun Repliz">
+                <option value="">Semua akun</option>
+                {accountLinks.map((link) => (
+                  <option key={link.replizId} value={link.replizId}>
+                    {accountLabel(link)}{link.masterId ? '' : ' · belum terhubung'}
+                  </option>
+                ))}
+              </select>
+              <p className={`text-[11px] font-semibold ${scopeReplizId && scopeLink?.masterId ? 'text-emerald-800' : 'text-gray-500'}`}>
+                {!scopeReplizId && 'Semua akun, termasuk klip tanpa Id_Akun.'}
+                {scopeReplizId && scopeLink?.masterId && `Terhubung ke ${scopeLink.masterId} · ${scopeLink.master?.nama || scopeLink.master?.name || ''}. Klip tanpa akun tidak ikut di sini.`}
+                {scopeReplizId && !scopeLink?.masterId && 'Akun ini belum terhubung. Atur di kartu pemetaan. Videonya tidak ikut sampai terhubung.'}
+              </p>
+            </Field>
+            <Field label="2. Filter produk" className="sm:col-span-2">
               <select value={videoProductActive} onChange={(event) => setVideoProduct(event.target.value)} className={controlClass} aria-label="Filter produk">
-                <option value="Semua">Semua produk</option>
+                <option value="Semua">Semua produk ({products.reduce((sum, item) => sum + item.belum, 0)} belum / {products.reduce((sum, item) => sum + item.total, 0)} total)</option>
                 {manualProducts.map((item) => <option key={item.name} value={item.name}>{productChoiceLabel(item)}</option>)}
               </select>
               <UnlinkedProductHint choices={manualProducts} />
             </Field>
-            <Field label="Video (Video Final)" className="sm:col-span-2">
+            <Field label={scopeReplizId ? '3. Video (Video Final · akun ini)' : '3. Video (Video Final)'} className="sm:col-span-2">
               <select value={manual.fileId} onChange={(event) => setManual((current) => ({ ...current, fileId: event.target.value }))} className={controlClass}>
                 <option value="">{videoOptions.length ? 'Pilih video' : 'Tidak ada video pada filter ini'}</option>
                 {videoOptions.map((item) => (
@@ -776,12 +976,11 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
                   </option>
                 ))}
               </select>
-            </Field>
-            <Field label="Akun Repliz">
-              <select value={manualAccountId} onChange={(event) => setManual((current) => ({ ...current, accountId: event.target.value }))} className={controlClass}>
-                <option value="">Pilih akun</option>
-                {accounts.map((account) => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
-              </select>
+              {scopeReplizId && scopeLink?.masterId && (
+                <p className="text-[11px] font-semibold text-gray-500">
+                  {videoOptions.length} video pada filter ini untuk {scopeLink.name}. Video akun lain tidak tampil.
+                </p>
+              )}
             </Field>
             <Field label="Produk">
               <input readOnly value={candidates.find((item) => item.key === manual.fileId)?.product || ''} className={controlClass} />
@@ -811,9 +1010,19 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
 
         <form onSubmit={fillQuick} className="rounded-2xl border border-emerald-100 bg-gradient-to-b from-white to-emerald-50 p-4 shadow-sm xl:col-span-2">
           <h3 className="text-[15px] font-bold">Isi cepat</h3>
-          <p className="mb-3 text-xs text-gray-500">Pilih produk, lalu isi otomatis: 1 video per hari pada jam tertentu, mulai tanggal yang dipilih. Video yang ditahan tidak ikut.</p>
+          <p className="mb-3 text-xs text-gray-500">Akun dipilih lebih dulu. Hitungan “belum / total” hanya untuk akun itu. Video yang ditahan tidak ikut.</p>
           <div className="grid grid-cols-1 gap-3">
-            <Field label="Produk">
+            <Field label="1. Akun Repliz">
+              <select value={scopeReplizId} onChange={(event) => setScopeReplizId(event.target.value)} className={`${controlClass} bg-white ${scopeReplizId ? 'border-emerald-300 ring-2 ring-emerald-100' : ''}`} aria-label="Akun Repliz isi cepat">
+                <option value="">Semua akun</option>
+                {accountLinks.map((link) => (
+                  <option key={link.replizId} value={link.replizId} disabled={!link.masterId}>
+                    {accountLabel(link)}{link.masterId ? '' : ' · belum terhubung'}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="2. Produk">
               <select value={quick.product} onChange={(event) => setQuick((current) => ({ ...current, product: event.target.value }))} className={`${controlClass} bg-white`}>
                 <option value="">Pilih produk</option>
                 {products.map((item) => (
@@ -833,19 +1042,13 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             <Field label="Mulai">
               <input type="date" value={quick.startDate} onChange={(event) => setQuick((current) => ({ ...current, startDate: event.target.value }))} className={`${controlClass} bg-white`} />
             </Field>
-            <Field label="Akun Repliz">
-              <select value={quickAccountId} onChange={(event) => setQuick((current) => ({ ...current, accountId: event.target.value }))} className={`${controlClass} bg-white`}>
-                <option value="">Pilih akun</option>
-                {accounts.map((account) => <option key={account.id} value={account.id}>{accountLabel(account)}</option>)}
-              </select>
-            </Field>
           </div>
           <button type="submit" className="mt-3 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white">Isi ke rencana</button>
           {quickNote && <p className="mt-2 text-xs font-semibold text-gray-700">{quickNote}</p>}
         </form>
       </div>
 
-      <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+      <section className="order-8 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
             <h3 className="text-[15px] font-bold">Daftar jadwal</h3>
@@ -872,7 +1075,31 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
           </div>
         </div>
         {scheduleError && <p className="px-4 pb-2 text-xs font-semibold text-red-700">{scheduleError}</p>}
-        <div className="overflow-x-auto">
+        <div className="divide-y divide-gray-100 lg:hidden">
+          {schedules.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-gray-500">{scheduleBusy ? 'Memuat jadwal…' : 'Belum ada jadwal pada filter ini.'}</p>
+          )}
+          {schedules.map((item) => {
+            const video = candidateById.get(item.fileId);
+            const view = scheduleStatusView(item.status);
+            return (
+              <article key={`m-${item.id}`} className="space-y-1 px-4 py-3">
+                <p className="text-xs font-semibold text-gray-800">{video?.fileName || item.description || 'Video'}</p>
+                <p className="text-[11px] font-semibold text-gray-500">{video?.product || '—'} · {item.accountName || item.accountUsername || '—'}</p>
+                <p className="text-[11px] font-semibold text-gray-800">{formatScheduleWib(item.scheduleAt)}</p>
+                <StatusChip status={item.status} />
+                {view.key === 'error' && item.errorMessage && <p className="text-[11px] font-semibold text-red-700">{item.errorMessage}</p>}
+                {view.key === 'pending' && (
+                  <button type="button" disabled={scheduleBusy} onClick={() => actOnSchedule(item, 'cancel')} className="block text-[11px] font-bold text-gray-600 underline">Batalkan jadwal</button>
+                )}
+                {view.key === 'error' && (
+                  <button type="button" disabled={scheduleBusy} onClick={() => actOnSchedule(item, 'retry')} className="block text-[11px] font-bold text-red-700 underline">Coba lagi</button>
+                )}
+              </article>
+            );
+          })}
+        </div>
+        <div className="hidden overflow-x-auto lg:block">
           <table className="w-full min-w-[760px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-y border-gray-200 bg-gray-50 text-[11px] uppercase tracking-wide text-gray-500">
@@ -924,7 +1151,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
           </div>
         )}
       </section>
-      <p className="mt-4 text-xs leading-relaxed text-gray-500">
+      <p className="order-9 mt-4 text-xs leading-relaxed text-gray-500">
         Video produk <strong className="font-semibold text-gray-700">Gantungan Bor</strong> sedang ditahan: tidak masuk ke rencana Gemini atau Isi cepat. Tandai Ditahan (Hold) tetap terlihat bila daftar lengkap dibuka.
       </p>
     </div>

@@ -16,6 +16,8 @@ import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import RekapProdukPanel from './RekapProdukPanel.jsx';
 import JadwalReplizPanel from './JadwalReplizPanel.jsx';
+import MobileShell, { MobileBotButton } from './MobileShell.jsx';
+import { MobileFyp, MobilePipeline, MobileProduk, MobileViolations } from './MobileViews.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
 import {
@@ -354,6 +356,8 @@ export default function App() {
   const [isCustomJenis, setIsCustomJenis] = useState(false);
   const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
   const [previewGallery, setPreviewGallery] = useState(null);
+  const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [mobileViolationForm, setMobileViolationForm] = useState(false);
 
   // STATE FILTER & PAGINATION ANALITIK FYP
   const [filterBulan, setFilterBulan] = useState('Semua');
@@ -1342,7 +1346,10 @@ export default function App() {
       linkVideo: item.linkVideo || '',
       screenshots: getViolationScreenshots(item)
     });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setMobileViolationForm(true);
+    requestAnimationFrame(() => {
+      document.getElementById('formulir-pelanggaran')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
   };
 
   const handleCancelEditViolation = () => {
@@ -1646,8 +1653,23 @@ export default function App() {
   ));
   const modalStarredCount = modalItems.filter((file) => lookupFileStar(file.fileKey, modalMonthFor(file)).isWinning).length;
 
+  const mobileCopy = {
+    pipeline: ['Rekap Pipeline', 'Mentahan, produksi, dan upload. Ketuk angka untuk buka file.'],
+    analitik: ['Laporan FYP', 'Saring data, pantau view, dan jalankan bot scraper.'],
+    jadwal: ['Jadwal Repliz', 'Pilih akun, lalu produk dan video menyesuaikan.'],
+    produk: ['Rekap Produk', 'Jumlah upload, rata-rata view, dan kelompok view. Sumber: Data_View.'],
+    pelanggaran: ['Pelanggaran', 'Catat teguran algoritma, bukti screenshot, dan status banding.'],
+    sinkron: ['Sinkron Bot', 'Hubungkan OneDrive, lalu sinkronkan Video Final dan Mentahan.'],
+  }[activeMenu] || ['Rekap Pipeline', ''];
+
+  const openMobileMenu = (id) => {
+    if (id === 'jadwal') setJadwalMounted(true);
+    setActiveMenu(id);
+    setMobileSheetOpen(false);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-12 relative print:bg-white print:pb-0">
+    <div className="min-h-screen bg-[#f3f5f4] font-sans text-gray-900 relative print:bg-white print:pb-0 pb-[calc(8.75rem+env(safe-area-inset-bottom))] lg:bg-gray-50 lg:pb-12 max-lg:font-[Plus_Jakarta_Sans,Inter,ui-sans-serif,system-ui,sans-serif]">
       
       {/* ========================================================================= */}
       {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE (BISA TANDAI BINTANG PER FILE)     */}
@@ -2004,8 +2026,26 @@ export default function App() {
         </div>
       )}
 
+      <MobileShell
+        menu={activeMenu}
+        title={mobileCopy[0]}
+        subtitle={mobileCopy[1]}
+        refreshing={loading}
+        onRefresh={fetchData}
+        headerAction={activeMenu === 'analitik' ? <MobileBotButton busy={isBotRunning || loading} onClick={runBotScraper} /> : null}
+        violationCount={violations.length}
+        syncing={driveSync.syncing}
+        sheetOpen={mobileSheetOpen}
+        onOpenSheet={() => setMobileSheetOpen(true)}
+        onCloseSheet={() => setMobileSheetOpen(false)}
+        onSelect={openMobileMenu}
+        onSyncSheets={() => { setMobileSheetOpen(false); fetchData(); }}
+        onPrint={() => { setMobileSheetOpen(false); window.print(); }}
+        onAskAi={() => { setIsAiAssistantOpen(true); if (!aiResponse) askAiAboutDashboard('Buatkan ringkasan laporan eksekutif dari data web saat ini'); }}
+      />
+
       {/* HEADER NAVIGASI RESPONSIF */}
-      <div className="bg-white border-b border-gray-200 px-4 md:px-6 py-3 flex flex-col gap-3 sticky top-0 z-30 shadow-sm print:hidden lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center lg:gap-x-4 lg:gap-y-2.5">
+      <div className="hidden bg-white border-b border-gray-200 px-4 md:px-6 py-3 sticky top-0 z-30 shadow-sm print:hidden lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center lg:gap-x-4 lg:gap-y-2.5">
         <div className="flex items-center gap-3 w-full justify-center lg:col-start-1 lg:row-start-1 lg:w-auto lg:justify-self-start lg:justify-start">
           <div className="w-10 h-10 bg-emerald-700 text-white rounded-lg flex items-center justify-center font-bold text-lg shrink-0">RP</div>
           <div>
@@ -2063,7 +2103,42 @@ export default function App() {
       {/* HALAMAN 1: REKAP MENTAHAN, PRODUKSI & UPLOAD                              */}
       {/* ========================================================================= */}
       {activeMenu === 'pipeline' && (
-        <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
+        <>
+        <MobilePipeline
+          loading={loading}
+          query={pipelineQuery}
+          onQuery={setPipelineQuery}
+          shown={pipelineShown}
+          total={pipelineTotal}
+          months={availableMonthsRekap.map((month) => ({ value: month, label: formatIsoMonthLabel(month) }))}
+          bulan={rekapBulan}
+          onBulan={setRekapBulan}
+          products={availableProductsRekap}
+          produk={rekapProduk}
+          onProduk={setRekapProduk}
+          people={personOptions}
+          accounts={accountOptions}
+          tim={rekapTim}
+          onTim={setRekapTim}
+          onlyWinning={onlyWinning}
+          onToggleWinning={() => setOnlyWinning((value) => !value)}
+          cards={visibleMonthlyCards}
+          onOpenFiles={openRealFilesModal}
+          totals={{ mentahan: totalMentahanRekap, belum: totalBelumDipakaiRekap, final: totalFinalRekap, upload: totalUploadRekap }}
+          ranking={aggregatedProducts}
+          sortBy={sortBy}
+          onSort={setSortBy}
+          compare={starMode === 'history' ? (
+            <StarMonthCompare
+              baseMonth={rekapBaseMonth}
+              compareMonth={rekapCompareBulan}
+              onCompareMonth={setRekapCompareBulan}
+              options={rekapCompareOptions}
+              result={rekapCompareResult}
+            />
+          ) : null}
+        />
+        <div className="hidden lg:block p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Rekap Mentahan, Produksi & Upload</h2>
@@ -2629,13 +2704,86 @@ export default function App() {
 
           </div>
         </div>
+        </>
       )}
 
       {/* ========================================================================= */}
       {/* HALAMAN 2: LAPORAN ANALITIK FYP                                           */}
       {/* ========================================================================= */}
       {activeMenu === 'analitik' && (
-        <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
+        <>
+        <MobileFyp
+          query={fypQuery}
+          onQuery={setFypQuery}
+          shown={filteredData.length}
+          total={fypScoped.length}
+          months={listBulan}
+          bulan={filterBulan}
+          onBulan={setFilterBulan}
+          accounts={listAkun}
+          akun={filterAkun}
+          onAkun={setFilterAkun}
+          accountLabel={(value) => accountLookup[String(value).toUpperCase()] || value}
+          statuses={[
+            { value: 'Semua', label: 'Semua status' },
+            { value: 'Semua FYP', label: 'Seluruh FYP' },
+            { value: 'FYP Awal', label: 'FYP Awal (10rb+)' },
+            { value: 'Berkelanjutan', label: 'Berkelanjutan (50rb+)' },
+            { value: 'Mega FYP', label: 'Mega FYP (100rb+)' },
+            { value: 'Super Viral', label: 'Super Viral (1jt+)' },
+            { value: 'Belum FYP', label: 'Belum FYP' },
+          ]}
+          status={filterFyp}
+          onStatus={setFilterFyp}
+          onlyStar={onlyWinningFyp}
+          onToggleStar={() => setOnlyWinningFyp((value) => !value)}
+          starred={starredFypCount}
+          stats={{
+            videos: statTotalVideo,
+            views: statTotalView.toLocaleString('id-ID'),
+            fyp: statFyp,
+          }}
+          rows={currentData.map((row) => {
+            const rawAkun = row.Nama_Akun || row.Id_Akun || '';
+            const fileKey = getFypFileKey(row);
+            const starInfo = fypStarInfo(row);
+            return {
+              key: getFypRowKey(row),
+              name: row.Induk_Barang,
+              account: accountLookup[String(rawAkun).toUpperCase()] || rawAkun,
+              date: getBulanFormat(row.Tanggal_Upload),
+              status: row.Video_FYP || 'Belum FYP',
+              views: (parseInt(String(row.View).replace(/[^0-9]/g, ''), 10) || 0).toLocaleString('id-ID'),
+              url: row.Link_Postingan || '',
+              canPlay: Boolean(row.Link_Postingan) && (Boolean(compareItemFromFyp(row).fileId) || canPlayTikTokUrl(row.Link_Postingan)),
+              starred: Boolean(fileKey && starInfo.isWinning),
+              starLocked: !fileKey || (starMode === 'history' && !starInfo.bulan),
+              row,
+            };
+          })}
+          page={currentPage}
+          pages={totalPages}
+          onPage={setCurrentPage}
+          onStar={(item) => {
+            if (item.starLocked) return;
+            const fileObj = getFypFileObj(item.row);
+            const starInfo = fypStarInfo(item.row);
+            saveFileWinningToSheet(fileObj, !starInfo.isWinning, starInfo.catatan, starInfo.bulan);
+          }}
+          onPlay={(item) => openTikTokPlayer(item.name || 'Video TikTok', item.url, { showCartNote: true, fypRow: item.row })}
+          onOpen={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
+          compare={starMode === 'history' ? (
+            <StarMonthCompare
+              baseMonth={fypBaseMonth}
+              compareMonth={fypCompareBulan}
+              onCompareMonth={setFypCompareBulan}
+              options={fypCompareOptions}
+              result={fypCompareResult}
+            />
+          ) : null}
+          loading={loading}
+        />
+        <div className="hidden lg:block p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
             <div className="w-full text-center md:text-left">
               <h2 className="text-2xl font-bold text-gray-900">Performa FYP & Evaluasi</h2>
@@ -2912,13 +3060,32 @@ export default function App() {
             )}
           </div>
         </div>
+        </>
       )}
 
       {/* ========================================================================= */}
       {/* HALAMAN: REKAP PRODUK (DATA_VIEW)                                         */}
       {/* ========================================================================= */}
       {activeMenu === 'produk' && (
-        <div className="p-4 md:p-8 max-w-[1400px] mx-auto">
+        <>
+        <MobileProduk
+          loading={loading}
+          rows={data}
+          month={produkBulan}
+          monthOptions={produkMonthOptions}
+          onMonthChange={setProdukBulan}
+          onOpenVideos={openRekapProdukVideos}
+          compare={starMode === 'history' ? (
+            <StarMonthCompare
+              baseMonth={produkBaseMonth}
+              compareMonth={produkCompareBulan}
+              onCompareMonth={setProdukCompareBulan}
+              options={produkCompareOptions}
+              result={produkCompareResult}
+            />
+          ) : null}
+        />
+        <div className="hidden lg:block p-4 md:p-8 max-w-[1400px] mx-auto">
           <RekapProdukPanel
             loading={loading}
             rows={data}
@@ -2938,6 +3105,7 @@ export default function App() {
             )}
           </RekapProdukPanel>
         </div>
+        </>
       )}
 
       {/* ========================================================================= */}
@@ -2945,14 +3113,31 @@ export default function App() {
       {/* ========================================================================= */}
       {activeMenu === 'pelanggaran' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
-          <div className="mb-6">
+          <MobileViolations
+            items={violations.map((item) => ({ ...item, shots: getViolationScreenshots(item) }))}
+            formOpen={mobileViolationForm || editingViolationId !== null}
+            onCreate={() => {
+              setMobileViolationForm(true);
+              setEditingViolationId(null);
+              setNewViolation(EMPTY_VIOLATION_FORM);
+              requestAnimationFrame(() => {
+                document.getElementById('formulir-pelanggaran')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            }}
+            onPlay={(item) => openTikTokPlayer(item.produk || 'Video pelanggaran', item.linkVideo, { produk: item.produk })}
+            onPreview={(item, index) => setPreviewGallery({ produk: item.produk, images: item.shots, activeIndex: index })}
+            onAddShots={handleQuickAddScreenshotsToRow}
+            onStatus={handleQuickStatusChange}
+            onEdit={handleStartEditViolation}
+          />
+          <div className="mb-6 hidden lg:block">
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
             <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, tambah jenis pelanggaran baru kapan saja, dan upload banyak bukti screenshot sekaligus.</p>
           </div>
 
-          <form onSubmit={handleAddViolation} className={`bg-white p-5 rounded-2xl shadow-sm border mb-6 print:hidden transition-colors ${editingViolationId !== null ? 'border-amber-400 ring-2 ring-amber-100' : 'border-red-200'}`}>
+          <form id="formulir-pelanggaran" onSubmit={handleAddViolation} className={`bg-white p-5 rounded-2xl shadow-sm border mb-6 print:hidden transition-colors ${editingViolationId !== null ? 'border-amber-400 ring-2 ring-amber-100' : 'border-red-200'} ${mobileViolationForm || editingViolationId !== null ? '' : 'max-lg:hidden'}`}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
                 {editingViolationId !== null ? (
@@ -3123,7 +3308,7 @@ export default function App() {
             </div>
           </form>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+          <div className="hidden lg:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-sm min-w-[950px]">
                 <thead>
@@ -3231,7 +3416,7 @@ export default function App() {
       {/* ========================================================================= */}
       {activeMenu === 'sinkron' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
-          <div className="mb-6">
+          <div className="mb-6 hidden lg:block">
             <h2 className="text-2xl font-bold text-gray-900">Sinkron Bot</h2>
             <p className="text-gray-500 mt-1">Hubungkan OneDrive, lalu sinkronkan folder Video Final dan Mentahan ke FILE_ASSET.</p>
           </div>
@@ -3254,6 +3439,7 @@ export default function App() {
             klipVideos={klipVideos}
             publishVideos={publishVideos}
             dataViews={data}
+            masterAccounts={masterAccounts}
           />
         </div>
       )}

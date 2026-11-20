@@ -70,7 +70,7 @@ function SyncChangelog({ log, scanning, onClose, closeDisabled }) {
         </button>
       </div>
 
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="mt-4 flex flex-col gap-4 lg:grid lg:grid-cols-2">
         <section>
           <h3 className="text-xs font-bold uppercase tracking-wide text-gray-500">File baru ({formatCount(log.totalBaru)})</h3>
           {log.daftarBaru.length === 0 ? (
@@ -249,7 +249,7 @@ export default function OneDriveSync({
   const alertText = [syncError, error].filter(Boolean).join(' ');
 
   return (
-    <div className="mb-6 print:hidden rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+    <div className="mb-6 print:hidden rounded-[22px] border border-black/[0.06] bg-white p-4 shadow-[0_8px_28px_rgba(15,23,42,0.07)] lg:rounded-xl lg:border-gray-200 lg:shadow-sm">
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">Sinkron OneDrive ke FILE_ASSET</p>
@@ -262,7 +262,7 @@ export default function OneDriveSync({
             {shownConnected === false && 'OneDrive belum terhubung. Masuk sekali dengan kode perangkat.'}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-2 gap-1.5 lg:flex lg:w-auto lg:flex-wrap lg:gap-2">
           {TARGETS.map((target) => {
             const runningThis = running === target.id;
             const continuing = resume?.target === target.id;
@@ -273,10 +273,15 @@ export default function OneDriveSync({
                 onClick={() => startSync(target.id)}
                 disabled={locked || shownConnected === false}
                 title={target.path}
-                className="px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full justify-center lg:w-auto px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {runningThis ? <RefreshCw className="w-4 h-4 animate-spin" /> : <FolderOpen className="w-4 h-4" />}
-                {runningThis ? 'Memindai...' : (continuing ? `Lanjutkan ${target.label}` : target.button)}
+                {runningThis ? 'Memindai...' : (
+                  <>
+                    <span className="lg:hidden">{continuing ? `Lanjutkan ${target.label}` : target.label}</span>
+                    <span className="hidden lg:inline">{continuing ? `Lanjutkan ${target.label}` : target.button}</span>
+                  </>
+                )}
               </button>
             );
           })}
@@ -284,7 +289,7 @@ export default function OneDriveSync({
             type="button"
             onClick={connect}
             disabled={locked}
-            className="px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            className="col-span-2 lg:col-auto w-full lg:w-auto justify-center px-4 py-2.5 rounded-xl font-bold text-xs md:text-sm flex items-center gap-2 border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
           >
             <RefreshCw className={`w-4 h-4 ${busy === 'login' ? 'animate-spin text-emerald-600' : ''}`} />
             {busy === 'login' ? 'Menunggu masuk...' : shownConnected ? 'Hubungkan ulang' : 'Hubungkan OneDrive'}
@@ -292,7 +297,7 @@ export default function OneDriveSync({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap gap-1 text-xs text-gray-500">
+      <div className="mt-3 flex flex-col gap-1 text-xs text-gray-500 lg:flex-row lg:flex-wrap">
         {TARGETS.map((target) => (
           <span key={target.id} className="sm:mr-4">
             <span className="font-semibold text-gray-700">{target.label}:</span> {target.path}
