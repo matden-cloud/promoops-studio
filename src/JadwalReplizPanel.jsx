@@ -22,6 +22,7 @@ import {
   mergePlanRows,
   planRowIssues,
   productChoiceLabel,
+  manualAccountMap,
   productChoices,
   removePlanRow,
   resolveAccountLinks,
@@ -99,15 +100,7 @@ function accountLabel(account) {
 function readAccountMap() {
   try {
     if (typeof localStorage === 'undefined') return {};
-    const parsed = JSON.parse(localStorage.getItem(REPLIZ_ACCOUNT_MAP_KEY) || '{}');
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    const clean = {};
-    for (const [key, value] of Object.entries(parsed)) {
-      const id = String(key || '').trim();
-      const master = String(value || '').trim();
-      if (id && master) clean[id] = master;
-    }
-    return clean;
+    return manualAccountMap(JSON.parse(localStorage.getItem(REPLIZ_ACCOUNT_MAP_KEY) || '{}'));
   } catch {
     return {};
   }
@@ -150,7 +143,7 @@ function AccountMapCard({ links, summary, masters, onMap }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-[15px] font-bold text-gray-900">Pemetaan akun Repliz ke MASTER_AKUN</h3>
-          <p className="mt-1 text-xs text-gray-500">Cocok nama yang yakin dipasangkan otomatis. Yang ragu diatur di sini, disimpan di browser — bukan di Sheets.</p>
+          <p className="mt-1 text-xs text-gray-500">Username yang cocok dipasangkan otomatis, lalu nama yang sama persis. Yang ragu diatur di sini, disimpan di browser — bukan di Sheets.</p>
         </div>
         <p className="rounded-full border border-sky-100 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800">
           {summary.auto} otomatis · {summary.manual} manual · {summary.unlinked} belum
@@ -170,7 +163,9 @@ function AccountMapCard({ links, summary, masters, onMap }) {
             ? 'Otomatis'
             : link.mode === 'manual'
               ? 'Manual (localStorage)'
-              : 'Belum terhubung';
+              : link.mode === 'ambiguous'
+                ? 'Perlu dipetakan manual'
+                : 'Belum terhubung';
           return (
             <div key={link.replizId} className={`rounded-xl border px-3 py-2.5 ${tone}`}>
               <p className={`text-[10px] font-extrabold uppercase tracking-wide ${kicker}`}>{label}</p>
