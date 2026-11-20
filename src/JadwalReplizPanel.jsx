@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Send, Sparkles, X } from 'lucide-react';
 import {
   CAPTION_LIMIT,
+  REPLIZ_STATUS_COUNTS,
   SCHEDULE_STATUS_FILTERS,
   SEND_GAP_MS,
+  UNLINKED_PRODUCT_HINT,
   appendPlanRows,
   buildQuickRows,
   buildVideoCandidates,
@@ -16,9 +18,12 @@ import {
   jakartaTomorrow,
   mergePlanRows,
   planRowIssues,
+  productChoiceLabel,
   productChoices,
   removePlanRow,
   scheduleStatusView,
+  summarizeReplizStatus,
+  summarizeVideoStock,
   toScheduleAt,
 } from '../server/jadwal-repliz.js';
 
@@ -86,14 +91,42 @@ function accountLabel(account) {
   return account.username ? `${name} (@${account.username})` : name;
 }
 
+function UnlinkedProductHint({ choices }) {
+  if (!choices?.some((item) => item.name === 'Tanpa produk')) return null;
+  return (
+    <p className="text-[11px] font-semibold leading-relaxed text-amber-800">
+      Tanpa produk: {UNLINKED_PRODUCT_HINT}
+    </p>
+  );
+}
+
+function StockStat({ label, value, tone }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{label}</p>
+      <p className={`mt-1 text-2xl font-black leading-none ${tone}`}>{value}</p>
+    </div>
+  );
+}
+
+const STATUS_TONE = {
+  pending: 'text-amber-700',
+  process: 'text-blue-700',
+  success: 'text-emerald-700',
+  error: 'text-red-700',
+};
+
 export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [], dataViews = [] }) {
   const [accounts, setAccounts] = useState([]);
   const [missing, setMissing] = useState([]);
   const [configMessage, setConfigMessage] = useState('');
   const [accountError, setAccountError] = useState('');
   const [fileAssets, setFileAssets] = useState(null);
-  const [assetNote, setAssetNote] = useState('');
   const [schedules, setSchedules] = useState([]);
+  const [statusCounts, setStatusCounts] = useState(null);
+  const [statusMode, setStatusMode] = useState('loading');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [statusBusy, setStatusBusy] = useState(false);
   const [scheduleStatus, setScheduleStatus] = useState('');
   const [schedulePage, setSchedulePage] = useState(1);
   const [scheduleMeta, setScheduleMeta] = useState({ totalPages: 1, totalDocs: 0 });
@@ -142,13 +175,26 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     dataViews,
   }), [fileAssets, klipVideos, publishVideos, dataViews]);
 
+  const stock = useMemo(() => summarizeVideoStock(candidates), [candidates]);
   const products = useMemo(() => productChoices(candidates), [candidates]);
+  const manualProducts = useMemo(() => products.filter((choice) => (
+    candidates.some((item) => {
+      const name = item.product || 'Tanpa produk';
+      if (name !== choice.name) return false;
+      if (!showUploaded && item.uploaded) return false;
+      if (!showHeld && item.held) return false;
+      return true;
+    })
+  )), [products, candidates, showUploaded, showHeld]);
+  const videoProductActive = videoProduct === 'Semua' || manualProducts.some((item) => item.name === videoProduct)
+    ? videoProduct
+    : 'Semua';
   const videoOptions = useMemo(() => filterCandidates(candidates, {
     uploaded: showUploaded ? 'semua' : 'belum',
     includeHeld: showHeld,
-    product: videoProduct,
+    product: videoProductActive,
     query: videoQuery,
-  }), [candidates, showUploaded, showHeld, videoProduct, videoQuery]);
+  }), [candidates, showUploaded, showHeld, videoProductActive, videoQuery]);
 
   const applySchedules = useCallback((result, response) => {
     if (!result) {
@@ -163,6 +209,43 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
       totalDocs: result.totalDocs || 0,
     });
     setScheduleError(response?.ok ? '' : (result.message || 'Gagal memuat jadwal Repliz.'));
+  }, []);
+
+  const loadReplizStatus = useCallback(async (signal) => {
+    try {
+      const responses = await Promise.all(REPLIZ_STATUS_COUNTS.map(async (item) => {
+        const response = await fetch(`${SCHEDULE_ENDPOINT}?status=${encodeURIComponent(item.id)}&limit=1`, { signal });
+        const body = await readJson(response);
+        return { id: item.id, ok: response.ok, body };
+      }));
+      if (signal?.aborted) return;
+      const unconfigured = responses.find((item) => item.body?.configured === false);
+      if (unconfigured) {
+        setStatusCounts(null);
+        setStatusMode('missing');
+        setStatusMessage(unconfigured.body?.message || 'Repliz belum dikonfigurasi.');
+        return;
+      }
+      const failed = responses.find((item) => !item.ok || !item.body || typeof item.body.totalDocs !== 'number');
+      if (failed) {
+        setStatusCounts(null);
+        setStatusMode('error');
+        setStatusMessage(failed.body?.message || 'Gagal memuat status Repliz.');
+        return;
+      }
+      const payloads = {};
+      for (const item of responses) payloads[item.id] = item.body;
+      setStatusCounts(summarizeReplizStatus(payloads));
+      setStatusMode('ready');
+      setStatusMessage('');
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+      setStatusCounts(null);
+      setStatusMode('error');
+      setStatusMessage('Gagal menghubungi Repliz.');
+    } finally {
+      if (!signal?.aborted) setStatusBusy(false);
+    }
   }, []);
 
   const loadSchedules = useCallback(async (status, page, signal) => {
@@ -186,6 +269,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
     const controller = new AbortController();
     const { signal } = controller;
     async function load() {
+      const statusTask = loadReplizStatus(signal);
       try {
         const params = new URLSearchParams({ page: '1', limit: '20' });
         const [accountResponse, assetResponse, scheduleResponse] = await Promise.all([
@@ -211,21 +295,21 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             namaFile: row.name,
             pathFolder: row.path,
           })));
-          setAssetNote('');
         } else {
           setFileAssets(null);
-          setAssetNote(assetBody?.message || '');
         }
         applySchedules(scheduleBody, scheduleResponse);
       } catch (err) {
         if (err?.name === 'AbortError') return;
         setAccountError('Gagal menghubungi server jadwal.');
         setFileAssets(null);
+      } finally {
+        await statusTask;
       }
     }
     load();
     return () => controller.abort();
-  }, [applySchedules]);
+  }, [applySchedules, loadReplizStatus]);
 
   const defaultAccountId = accounts.find((item) => item.connected)?.id || accounts[0]?.id || '';
   const manualAccountId = manual.accountId || defaultAccountId;
@@ -238,7 +322,9 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
 
   const candidateById = useMemo(() => {
     const map = new Map();
-    for (const item of candidates) map.set(item.fileId, item);
+    for (const item of candidates) {
+      if (item.fileId) map.set(item.fileId, item);
+    }
     return map;
   }, [candidates]);
 
@@ -315,9 +401,13 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
 
   function addManual(event) {
     event.preventDefault();
-    const video = candidates.find((item) => item.fileId === manual.fileId);
+    const video = candidates.find((item) => item.key === manual.fileId);
     if (!video) {
       setManualNote('Pilih video final.');
+      return;
+    }
+    if (!video.schedulable || !video.fileId) {
+      setManualNote(video.note || 'ID file belum ada');
       return;
     }
     if (video.held && !window.confirm('Video ini ditahan (Hold). Tetap masukkan ke rencana untuk diperiksa?')) return;
@@ -422,6 +512,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
         if (index < queue.length - 1) await wait(SEND_GAP_MS);
       }
       await loadSchedules(scheduleStatus, schedulePage);
+      await loadReplizStatus();
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -446,6 +537,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
       }
       setScheduleError('');
       await loadSchedules(scheduleStatus, schedulePage);
+      await loadReplizStatus();
     } catch {
       setScheduleError('Gagal menghubungi server jadwal.');
     } finally {
@@ -463,8 +555,58 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
       <div className="mb-5">
         <h2 className="text-2xl font-bold text-gray-900">Jadwal Repliz</h2>
         <p className="mt-1 text-sm text-gray-500">
-          Jadwalkan video final lewat asisten atau form. <strong className="font-semibold text-gray-700">Tidak ada yang dikirim</strong> sebelum tombol <strong className="font-semibold text-gray-700">Konfirmasi & kirim ke Repliz</strong> ditekan.
+          Jadwalkan video dari tab Klip_Vidio lewat asisten atau form. <strong className="font-semibold text-gray-700">Tidak ada yang dikirim</strong> sebelum tombol <strong className="font-semibold text-gray-700">Konfirmasi & kirim ke Repliz</strong> ditekan.
         </p>
+      </div>
+
+      <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" data-testid="stock-summary">
+          <h3 className="text-[15px] font-bold text-gray-900">Video Final</h3>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            <StockStat label="Total" value={stock.total} tone="text-gray-900" />
+            <StockStat label="Sudah diupload" value={stock.uploaded} tone="text-emerald-700" />
+            <StockStat label="Belum diupload" value={stock.belum} tone="text-amber-700" />
+          </div>
+          <p className="mt-3 text-[11px] font-semibold text-gray-400">Sumber: tab Klip_Vidio · status dari data publish</p>
+        </section>
+
+        <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" data-testid="repliz-status-summary">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-[15px] font-bold text-gray-900">Status di Repliz</h3>
+            <button
+              type="button"
+              onClick={() => {
+                setStatusBusy(true);
+                loadReplizStatus();
+              }}
+              disabled={statusBusy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-gray-700 disabled:opacity-50"
+              aria-label="Refresh status Repliz"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${statusBusy ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {REPLIZ_STATUS_COUNTS.map((item) => {
+              const value = statusMode === 'ready' && statusCounts ? statusCounts[item.id] : (statusMode === 'loading' ? '…' : '—');
+              return (
+                <div key={item.id} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2.5">
+                  <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{item.label}</p>
+                  <p className={`mt-1 text-2xl font-black leading-none ${STATUS_TONE[item.id]}`}>{value}</p>
+                  {item.hint && <p className="mt-1 text-[10px] font-semibold text-gray-400">{item.hint}</p>}
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-[11px] font-semibold text-gray-400">Langsung dari Repliz</p>
+          {statusMode === 'missing' && (
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">{statusMessage || 'Repliz belum dikonfigurasi.'}</p>
+          )}
+          {statusMode === 'error' && (
+            <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{statusMessage || 'Gagal memuat status Repliz.'}</p>
+          )}
+        </section>
       </div>
 
       {missing.length > 0 && (
@@ -610,24 +752,27 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
         <form onSubmit={addManual} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm xl:col-span-3">
           <h3 className="text-[15px] font-bold">Jadwal manual</h3>
           <p className="mb-3 text-xs text-gray-500">Pilih satu video final, lalu isi akun, waktu, dan caption.</p>
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-            <input value={videoQuery} onChange={(event) => setVideoQuery(event.target.value)} placeholder="Cari nama file" className={`${controlClass} sm:max-w-[220px]`} aria-label="Cari video" />
-            <select value={videoProduct} onChange={(event) => setVideoProduct(event.target.value)} className={controlClass} aria-label="Filter produk">
-              <option value="Semua">Semua produk</option>
-              {products.map((item) => <option key={item.name} value={item.name}>{item.name}{item.held ? ' (Ditahan)' : ''}</option>)}
-            </select>
+          <div className="mb-3">
+            <input value={videoQuery} onChange={(event) => setVideoQuery(event.target.value)} placeholder="Cari nama file" className={controlClass} aria-label="Cari video" />
           </div>
           <div className="mb-3 flex flex-wrap gap-3">
             <CheckOption checked={!showUploaded} onChange={(event) => setShowUploaded(!event.target.checked)}>Belum diupload</CheckOption>
             <CheckOption checked={showHeld} onChange={(event) => setShowHeld(event.target.checked)}>Tampilkan yang ditahan</CheckOption>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Filter produk" className="sm:col-span-2">
+              <select value={videoProductActive} onChange={(event) => setVideoProduct(event.target.value)} className={controlClass} aria-label="Filter produk">
+                <option value="Semua">Semua produk</option>
+                {manualProducts.map((item) => <option key={item.name} value={item.name}>{productChoiceLabel(item)}</option>)}
+              </select>
+              <UnlinkedProductHint choices={manualProducts} />
+            </Field>
             <Field label="Video (Video Final)" className="sm:col-span-2">
               <select value={manual.fileId} onChange={(event) => setManual((current) => ({ ...current, fileId: event.target.value }))} className={controlClass}>
                 <option value="">{videoOptions.length ? 'Pilih video' : 'Tidak ada video pada filter ini'}</option>
                 {videoOptions.map((item) => (
-                  <option key={item.fileId} value={item.fileId}>
-                    {item.fileName}{item.product ? ` · ${item.product}` : ''}{item.held ? ' · Ditahan' : ''}{item.uploaded ? ' · sudah diupload' : ''}
+                  <option key={item.key} value={item.key} disabled={!item.schedulable}>
+                    {item.fileName || 'Tanpa nama'}{item.product ? ` · ${item.product}` : ' · Tanpa produk'}{item.held ? ' · Ditahan' : ''}{item.uploaded ? ' · sudah diupload' : ''}{item.schedulable ? '' : ` · ${item.note}`}
                   </option>
                 ))}
               </select>
@@ -639,7 +784,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
               </select>
             </Field>
             <Field label="Produk">
-              <input readOnly value={candidates.find((item) => item.fileId === manual.fileId)?.product || ''} className={controlClass} />
+              <input readOnly value={candidates.find((item) => item.key === manual.fileId)?.product || ''} className={controlClass} />
             </Field>
             <Field label="Tanggal">
               <input type="date" value={manual.date} onChange={(event) => setManual((current) => ({ ...current, date: event.target.value }))} className={controlClass} />
@@ -662,7 +807,6 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             <button type="button" onClick={() => { setManual((current) => ({ ...current, fileId: '', caption: '', isDraft: false, isCommentDisabled: false, isAiGenerated: false })); setManualNote(''); }} className="rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-700">Reset</button>
           </div>
           {manualNote && <p className="mt-2 text-xs font-semibold text-gray-600">{manualNote}</p>}
-          {assetNote && <p className="mt-2 text-xs text-gray-500">{assetNote}</p>}
         </form>
 
         <form onSubmit={fillQuick} className="rounded-2xl border border-emerald-100 bg-gradient-to-b from-white to-emerald-50 p-4 shadow-sm xl:col-span-2">
@@ -672,8 +816,13 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             <Field label="Produk">
               <select value={quick.product} onChange={(event) => setQuick((current) => ({ ...current, product: event.target.value }))} className={`${controlClass} bg-white`}>
                 <option value="">Pilih produk</option>
-                {products.map((item) => <option key={item.name} value={item.name} disabled={item.held || item.open === 0}>{item.name}{item.held ? ' (Ditahan)' : ` (${item.open})`}</option>)}
+                {products.map((item) => (
+                  <option key={item.name} value={item.name} disabled={item.held || item.belum === 0}>
+                    {productChoiceLabel(item)}
+                  </option>
+                ))}
               </select>
+              <UnlinkedProductHint choices={products} />
             </Field>
             <Field label="Jumlah video">
               <input type="number" min="1" max="15" value={quick.count} onChange={(event) => setQuick((current) => ({ ...current, count: event.target.value }))} className={`${controlClass} bg-white`} />

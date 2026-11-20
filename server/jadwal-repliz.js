@@ -1,5 +1,7 @@
 // Logika murni jadwal Repliz. Tidak mengimpor modul Node supaya aman dipakai di UI.
 
+import { isItemId } from './onedrive-plan.js';
+
 export const CAPTION_LIMIT = 2200;
 export const SEND_GAP_MS = 400;
 export const PLAN_LIMIT = 15;
@@ -26,6 +28,16 @@ export const SCHEDULE_STATUS_FILTERS = Object.freeze([
   { id: 'success', label: 'Berhasil' },
   { id: 'error', label: 'Gagal' },
 ]);
+
+export const REPLIZ_STATUS_COUNTS = Object.freeze([
+  { id: 'pending', label: 'Menunggu', hint: 'antrean upload' },
+  { id: 'process', label: 'Diproses', hint: '' },
+  { id: 'success', label: 'Berhasil', hint: 'sudah terupload' },
+  { id: 'error', label: 'Gagal', hint: '' },
+]);
+
+export const UNLINKED_PRODUCT_HINT = 'Id_Campaign belum terhubung ke nama produk di sheet Campaign.';
+export const MISSING_FILE_ID_NOTE = 'ID file belum ada';
 
 export function scheduleStatusView(status) {
   const key = String(status || '').trim().toLowerCase();
@@ -217,47 +229,53 @@ function collectUploaded(dataViews, publishVideos) {
   return { ids, names };
 }
 
-function assetFileId(row) {
-  return text(row?.Cloud_File_ID || row?.cloudFileId || row?.Id_File || row?.idFile || row?.id || row?.fileId);
-}
-
 function assetName(row) {
   return text(row?.Nama_File || row?.namaFile || row?.name || row?.fileName);
 }
 
-function assetPath(row) {
-  return text(row?.Path_Folder || row?.pathFolder || row?.path);
+function validItemId(value) {
+  const id = text(value);
+  return isItemId(id) ? id : '';
 }
 
-function klipFileId(klip) {
-  return text(klip?.fileId || klip?.Id_File || klip?.Cloud_File_ID || klip?.cloudFileId);
-}
-
-function indexClips(klipVideos) {
-  const byId = new Map();
-  const byName = new Map();
-  for (const klip of Array.isArray(klipVideos) ? klipVideos : []) {
-    const id = klipFileId(klip);
-    if (id && !byId.has(id)) byId.set(id, klip);
-    const name = looseName(klip?.fileName ?? klip?.Nama_File);
-    if (name && !byName.has(name)) byName.set(name, klip);
+function firstValidId(...values) {
+  for (const value of values) {
+    const id = validItemId(value);
+    if (id) return id;
   }
-  return { byId, byName };
+  return '';
 }
 
-function clipAsAsset(klip) {
-  const name = text(klip?.fileName ?? klip?.Nama_File);
-  const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-  if (ext && !VIDEO_EXT.has(ext)) return null;
-  const id = klipFileId(klip);
-  if (!id || !name) return null;
-  return {
-    Cloud_File_ID: id,
-    Nama_File: name,
-    Path_Folder: 'Video Final',
-    Tanggal_File: klip?.date || klip?.Tanggal_Selesai || '',
-    produk: klip?.produk || klip?.Induk_Barang || '',
-  };
+function klipIdValues(klip) {
+  return [klip?.fileId, klip?.Id_Klip_Vidio, klip?.Vidio_Final_Id, klip?.vidioFinalId]
+    .map(text)
+    .filter(Boolean);
+}
+
+function indexAssetNames(fileAssets) {
+  const byId = new Map();
+  for (const row of Array.isArray(fileAssets) ? fileAssets : []) {
+    const name = assetName(row);
+    if (!name) continue;
+    const ids = [row?.Cloud_File_ID, row?.cloudFileId, row?.Id_File, row?.idFile, row?.id, row?.fileId]
+      .map(text)
+      .filter(Boolean);
+    for (const id of ids) {
+      if (!byId.has(id)) byId.set(id, name);
+    }
+  }
+  return byId;
+}
+
+function lookupAssetName(byId, ids) {
+  for (const id of ids) {
+    if (id && byId.has(id)) return byId.get(id);
+  }
+  return '';
+}
+
+function productNameOf(item) {
+  return text(item?.product) || 'Tanpa produk';
 }
 
 export function buildVideoCandidates({
@@ -266,37 +284,61 @@ export function buildVideoCandidates({
   publishVideos = [],
   dataViews = [],
 } = {}) {
-  const clips = indexClips(klipVideos);
+  const namesById = indexAssetNames(fileAssets);
   const uploaded = collectUploaded(dataViews, publishVideos);
-  const source = Array.isArray(fileAssets)
-    ? fileAssets.filter((row) => isVideoFinalPath(assetPath(row)) && isVideoFileName(assetName(row)))
-    : (Array.isArray(klipVideos) ? klipVideos : []).map(clipAsAsset).filter(Boolean);
-
   const seen = new Set();
   const candidates = [];
-  for (const row of source) {
-    const fileId = assetFileId(row);
-    const fileName = assetName(row);
-    if (!fileId || !fileName || seen.has(fileId)) continue;
-    seen.add(fileId);
-    const klip = clips.byId.get(fileId) || clips.byName.get(looseName(fileName)) || null;
-    const product = text(klip?.produk || klip?.Induk_Barang || row?.produk || row?.Induk_Barang);
-    const held = isHeldName(product) || isHeldName(fileName);
+  const clips = Array.isArray(klipVideos) ? klipVideos : [];
+  clips.forEach((klip, index) => {
+    if (!klip || typeof klip !== 'object') return;
+    const fileId = firstValidId(klip.fileId, klip.Id_Klip_Vidio, klip.Vidio_Final_Id, klip.vidioFinalId);
+    if (fileId && seen.has(fileId)) return;
+    if (fileId) seen.add(fileId);
+    const rawIds = klipIdValues(klip);
+    const fileName = text(klip.fileName ?? klip.Nama_File) || lookupAssetName(namesById, [fileId, ...rawIds]);
+    const product = text(klip.produk);
     const nameKey = looseName(fileName);
-    const isUploaded = uploaded.ids.has(fileId)
-      || (klip && uploaded.ids.has(klipFileId(klip)))
+    const isUploaded = rawIds.some((id) => uploaded.ids.has(id))
+      || (fileId && uploaded.ids.has(fileId))
       || (nameKey && uploaded.names.has(nameKey));
+    const schedulable = Boolean(fileId);
     candidates.push({
+      key: fileId || `missing:${index}`,
       fileId,
       fileName,
-      path: assetPath(row),
+      path: '',
       product,
-      held,
+      held: isHeldName(product) || isHeldName(fileName),
       uploaded: Boolean(isUploaded),
-      date: normalizeIsoDate(klip?.date || klip?.Tanggal_Selesai || row?.Tanggal_File || row?.date || ''),
+      date: normalizeIsoDate(klip.date || klip.Tanggal_Selesai || ''),
+      schedulable,
+      note: schedulable ? '' : MISSING_FILE_ID_NOTE,
     });
-  }
+  });
   return candidates;
+}
+
+export function summarizeVideoStock(candidates) {
+  const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+  const uploaded = list.filter((item) => item.uploaded).length;
+  return {
+    total: list.length,
+    uploaded,
+    belum: list.length - uploaded,
+  };
+}
+
+export function summarizeReplizStatus(payloads = {}) {
+  const read = (key) => {
+    const value = Number(payloads?.[key]?.totalDocs);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
+  };
+  return {
+    pending: read('pending'),
+    process: read('process'),
+    success: read('success'),
+    error: read('error'),
+  };
 }
 
 export function sortForPlanning(candidates) {
@@ -308,8 +350,9 @@ export function sortForPlanning(candidates) {
 }
 
 export function candidatesForPlanner(candidates) {
-  const open = sortForPlanning((candidates || []).filter((item) => item && !item.uploaded && !item.held));
-  const held = sortForPlanning((candidates || []).filter((item) => item && !item.uploaded && item.held));
+  const usable = (candidates || []).filter((item) => item && item.schedulable !== false);
+  const open = sortForPlanning(usable.filter((item) => !item.uploaded && !item.held));
+  const held = sortForPlanning(usable.filter((item) => !item.uploaded && item.held));
   return [...open, ...held].slice(0, 120);
 }
 
@@ -326,8 +369,8 @@ export function filterCandidates(candidates, {
     if (uploaded === 'belum' && item.uploaded) return false;
     if (uploaded === 'sudah' && !item.uploaded) return false;
     if (!includeHeld && item.held) return false;
-    if (productKey && productKey !== 'semua' && normName(item.product) !== productKey) return false;
-    if (needle && !normName(`${item.fileName} ${item.product}`).includes(needle)) return false;
+    if (productKey && productKey !== 'semua' && normName(productNameOf(item)) !== productKey) return false;
+    if (needle && !normName(`${item.fileName} ${productNameOf(item)}`).includes(needle)) return false;
     return true;
   });
 }
@@ -335,15 +378,37 @@ export function filterCandidates(candidates, {
 export function productChoices(candidates) {
   const map = new Map();
   for (const item of candidates || []) {
-    if (!item || item.uploaded) continue;
-    const name = item.product || 'Tanpa produk';
-    const current = map.get(name) || { name, count: 0, held: item.held, open: 0 };
-    current.count += 1;
-    if (!item.held) current.open += 1;
-    current.held = current.held && item.held;
+    if (!item) continue;
+    const name = productNameOf(item);
+    const current = map.get(name) || {
+      name,
+      total: 0,
+      belum: 0,
+      ditahan: 0,
+      held: false,
+      open: 0,
+      count: 0,
+    };
+    current.total += 1;
+    if (item.held) current.ditahan += 1;
+    if (!item.uploaded) {
+      current.belum += 1;
+      current.count += 1;
+      if (!item.held && item.schedulable !== false) current.open += 1;
+    }
+    current.held = isHeldName(name) || (current.total > 0 && current.ditahan === current.total);
     map.set(name, current);
   }
   return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'id'));
+}
+
+export function productChoiceLabel(choice) {
+  const name = text(choice?.name) || 'Tanpa produk';
+  if (choice?.held || isHeldName(name)) return `${name} (Ditahan)`;
+  const belum = Number(choice?.belum) || 0;
+  const total = Number(choice?.total) || 0;
+  const base = `${name} (${belum} belum / ${total} total)`;
+  return belum === 0 ? `${base} · habis` : base;
 }
 
 export function createPlanRow(fields = {}) {
@@ -404,7 +469,7 @@ export function buildQuickRows({
     uploaded: 'belum',
     includeHeld: false,
     product,
-  })).filter((item) => !taken.has(item.fileId));
+  })).filter((item) => item.schedulable !== false && item.fileId && !taken.has(item.fileId));
   const rows = [];
   for (let index = 0; index < Math.min(total, pool.length); index += 1) {
     const item = pool[index];
