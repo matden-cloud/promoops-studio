@@ -5,7 +5,7 @@ import {
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
-  Play, Smartphone, Package
+  Play, Smartphone, Package, CalendarClock
 } from 'lucide-react';
 import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
@@ -15,6 +15,7 @@ import { useOneDriveSync } from './useOneDriveSync.js';
 import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import RekapProdukPanel from './RekapProdukPanel.jsx';
+import JadwalReplizPanel from './JadwalReplizPanel.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
 import { useDebouncedQuery } from './useDebouncedQuery.js';
 import {
@@ -268,7 +269,8 @@ function FileLinkActions({ file, onPlay }) {
 
 
 export default function App() {
-  const [activeMenu, setActiveMenu] = useState('pipeline'); 
+  const [activeMenu, setActiveMenu] = useState('pipeline');
+  const [jadwalMounted, setJadwalMounted] = useState(false); 
 
   // --- STATE DATA ASLI DARI GOOGLE SHEETS ---
   const [data, setData] = useState([]);
@@ -2017,6 +2019,9 @@ export default function App() {
             <Bot className="w-4 h-4" /> Sinkron Bot
             {driveSync.syncing && <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-600" aria-hidden="true" />}
           </button>
+          <button type="button" onClick={() => { setJadwalMounted(true); setActiveMenu('jadwal'); }} className={`px-3 md:px-4 py-2 text-xs md:text-sm font-semibold rounded-md flex items-center gap-2 transition-all ${activeMenu === 'jadwal' ? 'bg-white text-emerald-700 shadow-sm border border-emerald-200' : 'text-gray-500 hover:text-gray-700'}`}>
+            <CalendarClock className="w-4 h-4" /> Jadwal Repliz
+          </button>
         </div>
 
         <div className="flex items-center justify-center gap-2 w-full lg:w-auto">
@@ -3227,6 +3232,16 @@ export default function App() {
             needsLogin={driveSync.needsLogin}
             startSync={driveSync.startSync}
             dismissChangelog={driveSync.dismissChangelog}
+          />
+        </div>
+      )}
+
+      {jadwalMounted && (
+        <div className={activeMenu === 'jadwal' ? '' : 'hidden'}>
+          <JadwalReplizPanel
+            klipVideos={klipVideos}
+            publishVideos={publishVideos}
+            dataViews={data}
           />
         </div>
       )}

@@ -24,6 +24,10 @@ Isi di **Project Settings → Environment Variables** untuk environment Producti
 | `GEMINI_API_KEY` | Kunci Gemini yang baru |
 | `GEMINI_MODEL` | Opsional. Nama model Gemini. Kosong berarti `gemini-3.5-flash-lite`. Hanya huruf, angka, titik, dan minus |
 | `ONEDRIVE_CLIENT_ID` | Application (client) ID aplikasi Microsoft publik untuk sinkron OneDrive. Bukan client secret. Login memakai `https://login.microsoftonline.com/common` |
+| `REPLIZ_ACCESS_KEY` | Access key API Repliz. Hanya dibaca server |
+| `REPLIZ_SECRET_KEY` | Secret key API Repliz. Hanya dibaca server |
+| `MEDIA_URL_SECRET` | Rahasia HMAC untuk URL media OneDrive yang diambil Repliz. Minimal 16 karakter. Tanpa ini jadwal tidak dikirim |
+| `PUBLIC_APP_URL` | Opsional. Origin publik aplikasi, misalnya `https://promo.example.com`. Kosong memakai `VERCEL_PROJECT_PRODUCTION_URL` |
 
 Perantara Apps Script hanya meneruskan aksi yang dipakai dashboard:
 
@@ -42,6 +46,8 @@ Bintang file per bulan laporan memakai `starHistory` dari `doGet`. Kalau field i
 Tombol **Sinkron Video Final** dan **Sinkron Mentahan** di tab **Sinkron Bot** memanggil `/api/onedrive-sync`. Masuk sekali lewat `/api/onedrive-login` (kode perangkat Microsoft). Refresh token disimpan di tab tersembunyi `_Token_OneDrive`, bukan di browser. Cara menempel aksi Apps Script ada di `apps-script/onedrive-sync.gs`. Selain `ONEDRIVE_CLIENT_ID`, tidak ada variabel baru: pemanggilan sheet tetap memakai `APPS_SCRIPT_URL` dan `APPS_SCRIPT_TOKEN`. Setelah sinkron, tab yang sama menampilkan nama dan path file baru serta nama/path lama menuju nama/path baru. Daftar itu tetap ada setelah halaman dimuat ulang sampai tombol **Tutup** diklik. Sinkron tetap berjalan bila pengguna pindah ke tab lain; tombol Sinkron Bot berputar selama proses itu.
 
 `GET /api/onedrive-stream?id=<Id_File>` memutar file OneDrive di dalam dashboard. Id diperiksa, token diambil dengan cara yang sama seperti sinkron (`get_onedrive_token` / `save_onedrive_token`), lalu browser diarahkan ke tautan unduh singkat dari Microsoft. Token tidak dikirim ke browser.
+
+Tab **Jadwal Repliz** menyusun rencana upload TikTok dari Video Final, lalu mengirimnya ke Repliz hanya setelah tombol **Konfirmasi & kirim ke Repliz**. Chat Gemini (`/api/repliz-plan`) hanya mengisi tabel konfirmasi dan tidak membuat jadwal. URL yang dikirim ke Repliz adalah tautan bertanda tangan `/api/repliz-media`, bukan `downloadUrl` Microsoft yang singkat. Video produk Gantungan Bor ditahan dan tidak masuk ke rencana otomatis. Jika `REPLIZ_ACCESS_KEY`, `REPLIZ_SECRET_KEY`, atau `MEDIA_URL_SECRET` belum diisi, tab tetap terbuka dengan pesan konfigurasi.
 
 Model default adalah `gemini-3.5-flash-lite`, pengganti resmi `gemini-2.5-flash`. Google menandai `gemini-2.5-flash` deprecated: mulai 1 Desember 2026 permintaan ke model itu dialihkan ke `gemini-3.5-flash-lite`, dan akses model 2.5 dibatasi ke proyek yang sudah pernah memakainya. Nama lain bisa diisi lewat `GEMINI_MODEL`. Untuk `gemini-2.5-flash`, server mematikan thinking (`thinkingBudget` 0) supaya token keluaran tidak habis sebelum jawaban terbentuk. Model Gemini 3 memakai `thinkingLevel` rendah (`MINIMAL` pada Flash-Lite, `LOW` pada Flash lain) dan tidak menerima `temperature`. Batas `maxOutputTokens` adalah 2048. Jika Google menolak, respons memuat `detail` berisi status HTTP, `error.status`, dan `error.message` dari Google; kunci API disensor. Kunci dikirim dari server lewat header, tidak lewat query string.
 

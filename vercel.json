@@ -17,6 +17,21 @@
     },
     "api/onedrive-stream.js": {
       "maxDuration": 30
+    },
+    "api/repliz-accounts.js": {
+      "maxDuration": 15
+    },
+    "api/repliz-schedule.js": {
+      "maxDuration": 30
+    },
+    "api/repliz-media.js": {
+      "maxDuration": 30
+    },
+    "api/repliz-plan.js": {
+      "maxDuration": 60
+    },
+    "api/repliz-assets.js": {
+      "maxDuration": 30
     }
   }
 }

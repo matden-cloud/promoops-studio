@@ -726,6 +726,42 @@ async function resolvePlaybackUrl({ requestImpl, itemId, auth, refresh, secrets 
   throw new HttpError(502, 'File OneDrive tidak bisa diputar.');
 }
 
+async function loadPlaybackUrl({ env, requestImpl, itemId, secrets }) {
+  const id = typeof itemId === 'string' ? itemId.trim() : '';
+  if (!isItemId(id)) throw new HttpError(400, 'Id file OneDrive tidak valid.');
+
+  const tokenState = await postAppsScript(env, requestImpl, 'get_onedrive_token', {}, secrets);
+  const refreshToken = String(tokenState.refreshToken || '').trim();
+  if (!refreshToken) {
+    throw needsLoginError('OneDrive belum terhubung. Masuk sekali dengan kode perangkat.');
+  }
+  const auth = await refreshAccessToken({ env, requestImpl, refreshToken, secrets });
+  const refresh = () => refreshAccessToken({
+    env,
+    requestImpl,
+    refreshToken: auth.refreshToken,
+    secrets,
+  });
+  return resolvePlaybackUrl({ requestImpl, itemId: id, auth, refresh, secrets });
+}
+
+export async function mintOneDriveDownloadUrl({ env, requestImpl, itemId }) {
+  const secrets = [];
+  try {
+    const url = await loadPlaybackUrl({ env, requestImpl, itemId, secrets });
+    return { ok: true, url };
+  } catch (err) {
+    const status = err instanceof HttpError ? err.status : 502;
+    const message = err instanceof HttpError ? err.message : 'Gagal menyiapkan file OneDrive.';
+    return {
+      ok: false,
+      status,
+      message: scrubString(message, secrets),
+      needsLogin: Boolean(err instanceof HttpError && err.extra?.needsLogin),
+    };
+  }
+}
+
 export async function handleOneDriveStreamRequest(request, deps = {}) {
   const env = deps.env || process.env;
   const requestImpl = deps.requestImpl || defaultRequest;
@@ -735,25 +771,12 @@ export async function handleOneDriveStreamRequest(request, deps = {}) {
     if (request.method.toUpperCase() !== 'GET' && request.method.toUpperCase() !== 'HEAD') {
       throw new HttpError(405, 'Metode tidak diizinkan.');
     }
-    const itemId = new URL(request.url).searchParams.get('id');
-    if (!isItemId(typeof itemId === 'string' ? itemId.trim() : '')) {
-      throw new HttpError(400, 'Id file OneDrive tidak valid.');
-    }
-    const id = itemId.trim();
-
-    const tokenState = await postAppsScript(env, requestImpl, 'get_onedrive_token', {}, secrets);
-    const refreshToken = String(tokenState.refreshToken || '').trim();
-    if (!refreshToken) {
-      throw needsLoginError('OneDrive belum terhubung. Masuk sekali dengan kode perangkat.');
-    }
-    const auth = await refreshAccessToken({ env, requestImpl, refreshToken, secrets });
-    const refresh = () => refreshAccessToken({
+    const playback = await loadPlaybackUrl({
       env,
       requestImpl,
-      refreshToken: auth.refreshToken,
+      itemId: new URL(request.url).searchParams.get('id'),
       secrets,
     });
-    const playback = await resolvePlaybackUrl({ requestImpl, itemId: id, auth, refresh, secrets });
     return redirect(playback);
   } catch (err) {
     return publicError(err, secrets);
