@@ -14,7 +14,11 @@ import {
   isScheduleAt,
   mediaExpiryUnix,
   planRowIssues,
+  productChoiceLabel,
+  productChoices,
   scheduleStatusView,
+  summarizeReplizStatus,
+  summarizeVideoStock,
   toScheduleAt,
 } from './jadwal-repliz.js';
 
@@ -61,7 +65,8 @@ describe('kandidat Video Final dan aturan hold', () => {
       fileAssets: assets(),
       klipVideos: [
         { fileId: FILE_A, fileName: 'nama lain.mp4', produk: 'Perata Keramik', date: '2026-11-16' },
-        { fileName: 'gntungan bor 10 nov andalan slsi 2.mp4', produk: 'Gantungan Bor Multifungsi', date: '2026-11-10' },
+        { fileId: FILE_B, fileName: 'gntungan bor 10 nov andalan slsi 2.mp4', produk: 'Gantungan Bor Multifungsi', date: '2026-11-10' },
+        { fileId: 'DRIVE!bordir-1', produk: 'Bordir' },
       ],
     });
     const ids = candidates.map((item) => item.fileId);
@@ -81,6 +86,11 @@ describe('kandidat Video Final dan aturan hold', () => {
   test('sudah diupload bila cocok dengan Data_View atau Publish', () => {
     const candidates = buildVideoCandidates({
       fileAssets: assets(),
+      klipVideos: [
+        { fileId: FILE_A, fileName: 'prata kramik 16 nov andalan slsi 2.mp4', produk: 'Perata Keramik' },
+        { fileId: FILE_B, fileName: 'gntungan bor 10 nov andalan slsi 2.mp4', produk: 'Gantungan Bor' },
+        { fileId: 'DRIVE!bordir-1', fileName: 'gantungan bordir motif.mp4', produk: 'Bordir' },
+      ],
       dataViews: [{ Id_Klip: FILE_A, Nama_File: 'prata kramik 16 nov andalan slsi 2.mp4', Induk_Barang: 'Perata Keramik' }],
       publishVideos: [{ klipId: 'DRIVE!bordir-1', fileName: 'gantungan bordir motif.mp4', produk: 'Bordir' }],
     });
@@ -99,11 +109,25 @@ describe('kandidat Video Final dan aturan hold', () => {
     });
     assert.equal(fromKlip.length, 1);
     assert.equal(fromKlip[0].product, 'Perata Keramik');
-    assert.deepEqual(buildVideoCandidates({ fileAssets: [], klipVideos: [{ fileId: FILE_A, fileName: 'perata.mp4' }] }), []);
+    const withEmptyAssets = buildVideoCandidates({
+      fileAssets: [],
+      klipVideos: [{ fileId: FILE_A, fileName: 'perata.mp4', produk: 'Perata Keramik' }],
+    });
+    assert.equal(withEmptyAssets.length, 1);
+    assert.equal(withEmptyAssets[0].fileId, FILE_A);
+    assert.deepEqual(buildVideoCandidates({ fileAssets: assets(), klipVideos: [] }), []);
+    assert.deepEqual(buildVideoCandidates({}), []);
   });
 
   test('perencana mengutamakan video yang tidak ditahan', () => {
-    const candidates = buildVideoCandidates({ fileAssets: assets(), klipVideos: [] });
+    const candidates = buildVideoCandidates({
+      fileAssets: assets(),
+      klipVideos: [
+        { fileId: FILE_A, fileName: 'prata kramik 16 nov andalan slsi 2.mp4', produk: 'Perata Keramik', date: '2026-11-16' },
+        { fileId: FILE_B, fileName: 'gntungan bor 10 nov andalan slsi 2.mp4', produk: 'Gantungan Bor', date: '2026-11-10' },
+        { fileId: 'DRIVE!bordir-1', fileName: 'gantungan bordir motif.mp4', produk: 'Bordir' },
+      ],
+    });
     const planner = candidatesForPlanner(candidates);
     assert.equal(planner[0].held, false);
     assert.equal(planner.at(-1).held, true);
@@ -201,5 +225,152 @@ describe('isi cepat, status, dan waktu WIB', () => {
     );
     assert.equal(merged.skipped, 1);
     assert.equal(merged.rows.length, 2);
+  });
+});
+
+describe('sumber Klip_Vidio, stok, dan status Repliz', () => {
+  test('sumber dari Klip_Vidio walau FILE_ASSET ada', () => {
+    const candidates = buildVideoCandidates({
+      fileAssets: assets(),
+      klipVideos: [
+        { fileId: FILE_A, fileName: 'perata dari klip.mp4', produk: 'Perata Keramik' },
+      ],
+    });
+    assert.equal(candidates.length, 1);
+    assert.equal(candidates[0].fileId, FILE_A);
+    assert.equal(candidates[0].fileName, 'perata dari klip.mp4');
+    assert.equal(candidates.some((item) => item.fileId === FILE_B), false);
+    assert.equal(candidates.some((item) => item.fileId === 'DRIVE!bordir-1'), false);
+  });
+
+  test('nama file boleh dilookup dari FILE_ASSET bila klip tidak punya nama', () => {
+    const [item] = buildVideoCandidates({
+      fileAssets: assets(),
+      klipVideos: [{ fileId: 'DRIVE!bordir-1', produk: 'Bordir' }],
+    });
+    assert.equal(item.fileName, 'gantungan bordir motif.mp4');
+    assert.equal(item.product, 'Bordir');
+  });
+
+  test('produk berasal dari klip.produk', () => {
+    const [item] = buildVideoCandidates({
+      fileAssets: [
+        { Id_File: FILE_A, Nama_File: 'prata.mp4', produk: 'Dari Asset', Induk_Barang: 'Dari Induk' },
+      ],
+      klipVideos: [{
+        fileId: FILE_A,
+        fileName: 'prata.mp4',
+        produk: 'Perata Keramik',
+        Induk_Barang: 'Bukan Produk Klip',
+      }],
+    });
+    assert.equal(item.product, 'Perata Keramik');
+  });
+
+  test('pencocokan upload via publishVideos.klipId dan Data_View.Id_Klip', () => {
+    const candidates = buildVideoCandidates({
+      klipVideos: [
+        { fileId: FILE_A, fileName: 'perata sudah.mp4', produk: 'Perata Keramik' },
+        { Id_Klip_Vidio: 'DRIVE!pisau-1', fileName: 'pisau sudah.mp4', produk: 'Pisau' },
+        { fileId: 'DRIVE!mentah-1', fileName: 'masih baru.mp4', produk: 'Pisau' },
+      ],
+      dataViews: [{ Id_Klip: FILE_A }],
+      publishVideos: [{ klipId: 'DRIVE!pisau-1' }],
+    });
+    assert.equal(candidates.find((item) => item.fileId === FILE_A).uploaded, true);
+    assert.equal(candidates.find((item) => item.fileId === 'DRIVE!pisau-1').uploaded, true);
+    assert.equal(candidates.find((item) => item.fileId === 'DRIVE!mentah-1').uploaded, false);
+    const stock = summarizeVideoStock(candidates);
+    assert.deepEqual(stock, { total: 3, uploaded: 2, belum: 1 });
+  });
+
+  test('hitungan total, belum, dan ditahan per produk', () => {
+    const candidates = buildVideoCandidates({
+      klipVideos: [
+        { fileId: 'DRIVE!a1', fileName: 'perata satu.mp4', produk: 'Perata Keramik' },
+        { fileId: 'DRIVE!a2', fileName: 'perata dua.mp4', produk: 'Perata Keramik' },
+        { fileId: 'DRIVE!a3', fileName: 'perata tiga.mp4', produk: 'Perata Keramik' },
+        { fileId: 'DRIVE!b1', fileName: 'gantungan bor satu.mp4', produk: 'Gantungan Bor' },
+        { fileId: 'DRIVE!b2', fileName: 'gantungan bor dua.mp4', produk: 'Gantungan Bor' },
+        { fileName: 'tanpa identitas perata.mp4', produk: 'Perata Keramik' },
+        { fileId: 'DRIVE!c1', fileName: 'tanpa nama produk.mp4', produk: '' },
+      ],
+      publishVideos: [{ klipId: 'DRIVE!a1' }],
+    });
+    const choices = productChoices(candidates);
+    const keramik = choices.find((item) => item.name === 'Perata Keramik');
+    const bor = choices.find((item) => item.name === 'Gantungan Bor');
+    const kosong = choices.find((item) => item.name === 'Tanpa produk');
+    assert.equal(keramik.total, 4);
+    assert.equal(keramik.belum, 3);
+    assert.equal(keramik.ditahan, 0);
+    assert.equal(keramik.held, false);
+    assert.equal(bor.total, 2);
+    assert.equal(bor.belum, 2);
+    assert.equal(bor.ditahan, 2);
+    assert.equal(bor.held, true);
+    assert.equal(kosong.total, 1);
+    assert.equal(kosong.belum, 1);
+    assert.equal(productChoiceLabel(keramik), 'Perata Keramik (3 belum / 4 total)');
+    assert.equal(productChoiceLabel(bor), 'Gantungan Bor (Ditahan)');
+    assert.equal(
+      productChoiceLabel({ name: 'Spons', held: false, belum: 0, total: 2 }),
+      'Spons (0 belum / 2 total) · habis',
+    );
+    assert.deepEqual(summarizeVideoStock(candidates), { total: 7, uploaded: 1, belum: 6 });
+  });
+
+  test('klip tanpa file id tercatat, schedulable false, dan tidak masuk isi cepat atau Gemini', () => {
+    const candidates = buildVideoCandidates({
+      fileAssets: assets(),
+      klipVideos: [
+        { fileName: 'klip tanpa id.mp4', produk: 'Pisau', fileId: 'bukan/id-valid' },
+        { fileId: '', Vidio_Final_Id: 'salah?id', fileName: 'masih kosong.mp4', produk: 'Pisau' },
+        { fileId: 'DRIVE!pisau-ok', fileName: 'pisau siap.mp4', produk: 'Pisau', date: '2026-11-18' },
+      ],
+    });
+    assert.equal(candidates.length, 3);
+    assert.equal(candidates[0].schedulable, false);
+    assert.equal(candidates[0].fileId, '');
+    assert.equal(candidates[0].note, 'ID file belum ada');
+    assert.equal(candidates[1].schedulable, false);
+    assert.equal(candidates[1].note, 'ID file belum ada');
+    assert.equal(summarizeVideoStock(candidates).total, 3);
+    const planner = candidatesForPlanner(candidates);
+    assert.deepEqual(planner.map((item) => item.fileId), ['DRIVE!pisau-ok']);
+    const quick = buildQuickRows({
+      candidates,
+      product: 'Pisau',
+      count: 3,
+      startDate: '2026-11-21',
+      time: '19:00',
+      accountId: 'acct12345678',
+    });
+    assert.equal(quick.rows.length, 1);
+    assert.equal(quick.rows[0].fileId, 'DRIVE!pisau-ok');
+  });
+
+  test('id jadwal memakai Id_Klip_Vidio lalu fallback Vidio_Final_Id', () => {
+    const candidates = buildVideoCandidates({
+      klipVideos: [
+        { fileId: 'ada/garis-miring', Vidio_Final_Id: 'DRIVE!final-1', fileName: 'final satu.mp4', produk: 'Pisau' },
+        { Id_Klip_Vidio: 'DRIVE!klip-2', Vidio_Final_Id: 'DRIVE!final-2', fileName: 'final dua.mp4', produk: 'Pisau' },
+      ],
+    });
+    assert.equal(candidates[0].fileId, 'DRIVE!final-1');
+    assert.equal(candidates[0].schedulable, true);
+    assert.equal(candidates[0].note, '');
+    assert.equal(candidates[1].fileId, 'DRIVE!klip-2');
+  });
+
+  test('ringkasan status Repliz memakai totalDocs', () => {
+    const summary = summarizeReplizStatus({
+      pending: { schedules: [{}], totalDocs: 12, limit: 1 },
+      process: { schedules: [{}, {}], totalDocs: 3, limit: 1 },
+      success: { schedules: [], totalDocs: 40 },
+      error: { totalDocs: 2 },
+    });
+    assert.deepEqual(summary, { pending: 12, process: 3, success: 40, error: 2 });
+    assert.equal(summarizeReplizStatus({ pending: { schedules: [{}, {}, {}] } }).pending, 0);
   });
 });
