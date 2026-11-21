@@ -481,13 +481,15 @@ describe('filter video per akun Repliz', () => {
     assert.equal(normalizeAccountHandle('@pasar.digital79'), 'pasardigital');
     assert.equal(normalizeAccountHandle('Pasar Digitals'), 'pasardigitals');
     assert.equal(normalizeAccountHandle('@melifarida_toserba'), 'melifaridatoserba');
+    assert.equal(normalizeAccountHandle('@grosirimportindonesia'), 'grosirimportindonesia');
+    assert.equal(normalizeAccountHandle('@jualkawatpembersihpipa'), 'jualkawatpembersihpipa');
+    assert.equal(normalizeAccountHandle('Jual Kawat'), 'jualkawat');
     assert.equal(KNOWN_HANDLE_OVERRIDES.find((item) => item.handle === 'pasar.digital79')?.id, 'AKN_005');
-    const repliz = [
-      ...REPLIZ_ACCOUNTS,
-      { id: 'r-toko', name: 'Toko Andalan', username: '' },
-      { id: 'r-user', name: 'Nama Lain Sekali', username: '@jualkawat' },
-    ];
-    const links = resolveAccountLinks(repliz, MASTERS, {});
+    assert.equal(KNOWN_HANDLE_OVERRIDES.find((item) => item.handle === 'grosirimportindonesia')?.id, 'AKN_003');
+    assert.equal(KNOWN_HANDLE_OVERRIDES.find((item) => item.handle === 'grosirimportindonesia')?.nama, 'Grosir Hitam');
+    assert.equal(KNOWN_HANDLE_OVERRIDES.find((item) => item.handle === 'jualkawatpembersihpipa')?.id, 'AKN_001');
+    assert.equal(KNOWN_HANDLE_OVERRIDES.find((item) => item.handle === 'jualkawatpembersihpipa')?.nama, 'Jual Kawat');
+    const links = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, {});
     const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
     assert.equal(byId['r-pasar'].mode, 'auto-username');
     assert.equal(byId['r-pasar'].masterId, 'AKN_005');
@@ -497,24 +499,44 @@ describe('filter video per akun Repliz', () => {
     assert.equal(byId['r-produk'].masterId, 'AKN_002');
     assert.equal(byId['r-hasil'].mode, 'auto-name');
     assert.equal(byId['r-hasil'].masterId, 'AKN_006');
-    assert.equal(byId['r-user'].mode, 'auto-username');
-    assert.equal(byId['r-user'].masterId, 'AKN_001');
-    assert.equal(byId['r-grosir'].mode, 'unlinked');
-    assert.equal(byId['r-grosir'].masterId, '');
-    assert.equal(byId['r-kawat'].mode, 'unlinked');
-    assert.equal(byId['r-kawat'].masterId, '');
-    assert.equal(byId['r-toko'].mode, 'unlinked');
-    assert.equal(byId['r-toko'].masterId, '');
-    const summary = summarizeAccountLinks(links);
-    assert.deepEqual(summary, { auto: 5, manual: 0, unlinked: 3 });
-    const manual = resolveAccountLinks(repliz, MASTERS, { 'r-grosir': 'AKN_003', 'r-hasil': 'AKN_001' });
+    assert.equal(byId['r-grosir'].mode, 'auto-username');
+    assert.equal(byId['r-grosir'].masterId, 'AKN_003');
+    assert.equal(byId['r-grosir'].master.nama, 'Grosir Hitam');
+    assert.equal(byId['r-kawat'].mode, 'auto-username');
+    assert.equal(byId['r-kawat'].masterId, 'AKN_001');
+    assert.equal(byId['r-kawat'].master.nama, 'Jual Kawat');
+    assert.deepEqual(
+      links.map((link) => link.masterId).sort(),
+      ['AKN_001', 'AKN_002', 'AKN_003', 'AKN_004', 'AKN_005', 'AKN_006'],
+    );
+    assert.deepEqual(summarizeAccountLinks(links), { auto: 6, manual: 0, unlinked: 0 });
+
+    const extras = resolveAccountLinks([
+      { id: 'r-toko', name: 'Toko Andalan', username: '' },
+      { id: 'r-user', name: 'Nama Lain Sekali', username: '@jualkawat' },
+    ], MASTERS, {});
+    const extraById = Object.fromEntries(extras.map((link) => [link.replizId, link]));
+    assert.equal(extraById['r-user'].mode, 'auto-username');
+    assert.equal(extraById['r-user'].masterId, 'AKN_001');
+    assert.equal(extraById['r-toko'].mode, 'unlinked');
+    assert.equal(extraById['r-toko'].masterId, '');
+
+    const manual = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, { 'r-grosir': 'AKN_003', 'r-hasil': 'AKN_001' });
     const mapped = Object.fromEntries(manual.map((link) => [link.replizId, link]));
     assert.equal(mapped['r-grosir'].mode, 'manual');
     assert.equal(mapped['r-grosir'].masterId, 'AKN_003');
     assert.equal(mapped['r-hasil'].mode, 'manual');
     assert.equal(mapped['r-hasil'].masterId, 'AKN_001');
     assert.equal(mapped['r-pasar'].masterId, 'AKN_005');
-    const missing = resolveAccountLinks(repliz, MASTERS, { 'r-toko': 'AKN_999' });
+    assert.equal(mapped['r-produk'].masterId, 'AKN_002');
+    assert.equal(mapped['r-meli'].masterId, 'AKN_004');
+    assert.equal(mapped['r-kawat'].mode, 'ambiguous');
+    assert.equal(mapped['r-kawat'].masterId, '');
+    const missing = resolveAccountLinks(
+      [...REPLIZ_ACCOUNTS, { id: 'r-toko', name: 'Toko Andalan', username: '' }],
+      MASTERS,
+      { 'r-toko': 'AKN_999' },
+    );
     assert.equal(missing.find((link) => link.replizId === 'r-toko').mode, 'unlinked');
   });
 
@@ -559,6 +581,10 @@ describe('filter video per akun Repliz', () => {
     assert.equal(manual['r-pasar'].masterId, 'AKN_004');
     assert.equal(manual['r-meli'].mode, 'ambiguous');
     assert.equal(manual['r-meli'].masterId, '');
+    assert.equal(manual['r-grosir'].mode, 'auto-username');
+    assert.equal(manual['r-grosir'].masterId, 'AKN_003');
+    assert.equal(manual['r-kawat'].mode, 'auto-username');
+    assert.equal(manual['r-kawat'].masterId, 'AKN_001');
   });
 
   test('peta manual lama tetap, sisa otomatis yang tersimpan diabaikan', () => {
@@ -586,6 +612,8 @@ describe('filter video per akun Repliz', () => {
     assert.equal(byId['r-meli'].masterId, 'AKN_001');
     assert.equal(byId['r-produk'].mode, 'manual');
     assert.equal(byId['r-produk'].masterId, 'AKN_002');
+    assert.equal(byId['r-kawat'].mode, 'ambiguous');
+    assert.equal(byId['r-kawat'].masterId, '');
   });
 
   test('kolom handle dan label MASTER_AKUN ikut dicocokkan, awalan yang mirip tidak', () => {
@@ -593,7 +621,8 @@ describe('filter video per akun Repliz', () => {
       [
         { id: 'r-x', name: 'Nama Bebas', username: '@toko.rahasia8' },
         { id: 'r-label', name: 'Bukan nama produk', username: 'produk_andalan_kita' },
-        { id: 'r-kawat', name: 'Solusi Pembersih Saluran Air', username: 'jualkawatpembersihpipa' },
+        { id: 'r-mirip', name: 'Mirip Jual Kawat', username: 'jualkawatbor' },
+        { id: 'r-kawat', name: 'Solusi Pembersih Saluran Air', username: '@JualKawatPembersihPipa' },
       ],
       [
         { id: 'AKN_007', nama: 'Nama Master', handle: 'toko_rahasia8' },
@@ -607,7 +636,47 @@ describe('filter video per akun Repliz', () => {
     assert.equal(byId['r-x'].masterId, 'AKN_007');
     assert.equal(byId['r-label'].mode, 'auto-username');
     assert.equal(byId['r-label'].masterId, 'AKN_002');
-    assert.equal(byId['r-kawat'].mode, 'unlinked');
+    assert.equal(byId['r-mirip'].mode, 'unlinked');
+    assert.equal(byId['r-mirip'].masterId, '');
+    assert.equal(byId['r-kawat'].mode, 'auto-username');
+    assert.equal(byId['r-kawat'].masterId, 'AKN_001');
+  });
+
+  test('handle dikenal dan username yang sama ke satu Id_Akun tetap dibatalkan', () => {
+    const links = resolveAccountLinks([
+      { id: 'r-kawat', name: 'Solusi Pembersih Saluran Air', username: 'jualkawatpembersihpipa' },
+      { id: 'r-user', name: 'Nama Lain Sekali', username: '@jualkawat' },
+      { id: 'r-grosir', name: 'Grosir Import Indonesia', username: 'grosirimportindonesia' },
+    ], MASTERS, {});
+    const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-kawat'].mode, 'ambiguous');
+    assert.equal(byId['r-kawat'].masterId, '');
+    assert.equal(byId['r-user'].mode, 'ambiguous');
+    assert.equal(byId['r-user'].masterId, '');
+    assert.equal(byId['r-grosir'].mode, 'auto-username');
+    assert.equal(byId['r-grosir'].masterId, 'AKN_003');
+    assert.deepEqual(summarizeAccountLinks(links), { auto: 1, manual: 0, unlinked: 2 });
+  });
+
+  test('pilihan manual menimpa peta handle yang dikenal', () => {
+    const stored = {
+      'r-grosir': 'AKN_001',
+      'r-kawat': { masterId: 'AKN_003', manual: true },
+      'r-pasar': { masterId: 'AKN_002', source: 'auto-username' },
+    };
+    const picked = REPLIZ_ACCOUNTS.filter((item) => ['r-grosir', 'r-kawat', 'r-pasar'].includes(item.id));
+    const links = resolveAccountLinks(picked, MASTERS, stored);
+    const byId = Object.fromEntries(links.map((link) => [link.replizId, link]));
+    assert.equal(byId['r-grosir'].mode, 'manual');
+    assert.equal(byId['r-grosir'].masterId, 'AKN_001');
+    assert.equal(byId['r-kawat'].mode, 'manual');
+    assert.equal(byId['r-kawat'].masterId, 'AKN_003');
+    assert.equal(byId['r-pasar'].mode, 'auto-username');
+    assert.equal(byId['r-pasar'].masterId, 'AKN_005');
+    assert.deepEqual(manualAccountMap(stored), {
+      'r-grosir': 'AKN_001',
+      'r-kawat': 'AKN_003',
+    });
   });
 
   test('filter video @pasar.digital79 memakai Id_Akun AKN_005', () => {
@@ -639,5 +708,52 @@ describe('filter video per akun Repliz', () => {
     });
     assert.deepEqual(quick.rows.map((row) => row.fileId), ['DRIVE!pasar']);
     assert.equal(quick.rows[0].accountId, 'r-pasar');
+  });
+
+  test('filter video handle baru memakai Id_Akun AKN_003 dan AKN_001', () => {
+    const links = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, {});
+    const grosir = links.find((link) => link.replizId === 'r-grosir');
+    const kawat = links.find((link) => link.replizId === 'r-kawat');
+    const clips = buildVideoCandidates({
+      klipVideos: [
+        { fileId: 'DRIVE!grosir', fileName: 'grosir.mp4', produk: 'Sapu', Id_Akun: 'AKN_003', Sumber: 'Klip_Vidio' },
+        { fileId: 'DRIVE!kawat', fileName: 'kawat.mp4', produk: 'Sapu', Id_Akun: 'AKN_001', Sumber: 'Klip_Vidio' },
+        { fileId: 'DRIVE!lain', fileName: 'lain.mp4', produk: 'Sapu', Id_Akun: 'AKN_002', Sumber: 'Klip_Vidio' },
+      ],
+    });
+    assert.equal(grosir.mode, 'auto-username');
+    assert.equal(grosir.masterId, 'AKN_003');
+    assert.equal(kawat.mode, 'auto-username');
+    assert.equal(kawat.masterId, 'AKN_001');
+    assert.deepEqual(
+      filterCandidates(clips, { uploaded: 'semua', includeHeld: true, accountId: grosir.masterId }).map((item) => item.fileId),
+      ['DRIVE!grosir'],
+    );
+    assert.deepEqual(
+      candidatesForAccount(clips, kawat.masterId).map((item) => item.fileId),
+      ['DRIVE!kawat'],
+    );
+    const quick = buildQuickRows({
+      candidates: clips,
+      product: 'Sapu',
+      count: 3,
+      startDate: '2026-11-21',
+      time: '19:00',
+      accountId: kawat.replizId,
+      idAkun: kawat.masterId,
+    });
+    assert.deepEqual(quick.rows.map((row) => row.fileId), ['DRIVE!kawat']);
+    assert.equal(quick.rows[0].accountId, 'r-kawat');
+
+    const overridden = resolveAccountLinks(REPLIZ_ACCOUNTS, MASTERS, { 'r-kawat': 'AKN_003' });
+    const manualKawat = overridden.find((link) => link.replizId === 'r-kawat');
+    const autoGrosir = overridden.find((link) => link.replizId === 'r-grosir');
+    assert.equal(manualKawat.mode, 'manual');
+    assert.equal(manualKawat.masterId, 'AKN_003');
+    assert.equal(autoGrosir.mode, 'ambiguous');
+    assert.deepEqual(
+      filterCandidates(clips, { uploaded: 'semua', includeHeld: true, accountId: manualKawat.masterId }).map((item) => item.fileId),
+      ['DRIVE!grosir'],
+    );
   });
 });
