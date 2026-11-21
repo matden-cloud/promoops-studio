@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import AppBrand from './AppBrand.jsx';
 import {
   BarChart2,
   Bot,
@@ -88,7 +89,8 @@ export default function MobileShell({
 
   return (
     <div className="lg:hidden print:hidden">
-      <div className="px-4 pb-3 pt-1">
+      <AppBrand compact heading="p" className="px-4 pt-3" />
+      <div className="px-4 pb-3 pt-2">
         <div className="flex min-h-7 items-center justify-between gap-2">
           <div className="min-w-0">{headerAction}</div>
           <button
