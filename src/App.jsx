@@ -17,6 +17,7 @@ import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import RekapProdukPanel from './RekapProdukPanel.jsx';
 import JadwalReplizPanel from './JadwalReplizPanel.jsx';
 import EditorVoicePanel from './EditorVoicePanel.jsx';
+import AppBrand from './AppBrand.jsx';
 import MobileShell, { MobileBotButton } from './MobileShell.jsx';
 import { MobileFyp, MobilePipeline, MobileProduk, MobileViolations } from './MobileViews.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
@@ -2061,13 +2062,7 @@ export default function App() {
 
       {/* HEADER NAVIGASI RESPONSIF */}
       <div className="hidden bg-white border-b border-gray-200 px-4 md:px-6 py-3 sticky top-0 z-30 shadow-sm print:hidden lg:grid lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center lg:gap-x-4 lg:gap-y-2.5">
-        <div className="flex items-center gap-3 w-full justify-center lg:col-start-1 lg:row-start-1 lg:w-auto lg:justify-self-start lg:justify-start">
-          <div className="w-10 h-10 bg-emerald-700 text-white rounded-lg flex items-center justify-center font-bold text-lg shrink-0">RP</div>
-          <div>
-            <h1 className="font-bold text-gray-900 text-sm">PromoOps & Riset</h1>
-            <p className="text-xs text-gray-500">OneDrive • Produksi • Publisher</p>
-          </div>
-        </div>
+        <AppBrand className="w-full justify-center lg:col-start-1 lg:row-start-1 lg:w-auto lg:justify-self-start lg:justify-start" />
         
         <div className="flex flex-wrap justify-center bg-gray-50 p-1 rounded-lg border border-gray-200 shadow-inner w-full gap-1 lg:col-span-2 lg:row-start-2 lg:flex-nowrap lg:justify-center">
           <button type="button" onClick={() => setActiveMenu('pipeline')} className={navTabClass(activeMenu === 'pipeline')}>

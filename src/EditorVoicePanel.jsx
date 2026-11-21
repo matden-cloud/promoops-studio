@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -24,6 +24,7 @@ import { initialSelection, moveSelection, parseWavPcm, renderTrimmedWav, wavefor
 import { base64ToBytes, bytesToBase64, decodeMediaFile } from './voiceDecode.js';
 import { readInworldUsage, rememberInworldAudio } from './inworldMeter.js';
 import { listVoiceResults, saveVoiceResult } from './voiceStore.js';
+import { GEMINI_VOICE_LABEL, filterVoices, partitionProfiles, voiceSample } from './voicePicker.js';
 
 const ENGINES = [
   { id: 'gemini', label: 'Gemini' },
@@ -186,6 +187,112 @@ function playSlice(source, selection) {
   node.connect(ctx.destination);
   node.onended = () => ctx.close();
   node.start();
+}
+
+function GeminiVoiceSelect({ voices, value, onChange, playingId, onPlaySample }) {
+  const listId = useId();
+  const rootRef = useRef(null);
+  const searchRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selected = voices.find((voice) => voice.id === value) || null;
+  const shown = filterVoices(voices, query);
+  const sample = voiceSample(selected);
+  const sampleId = selected ? `sample:${selected.id}` : '';
+
+  useEffect(() => {
+    if (!open) return undefined;
+    searchRef.current?.focus();
+    function onPointer(event) {
+      if (!rootRef.current?.contains(event.target)) setOpen(false);
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  function choose(id) {
+    onChange(id);
+    setOpen(false);
+    setQuery('');
+  }
+
+  return (
+    <div ref={rootRef} className="relative mt-2 border-t border-black/[0.06] pt-2">
+      <span id={`${listId}-label`} className="mb-1 block text-[8.5px] font-extrabold uppercase tracking-[0.08em] text-slate-400">{GEMINI_VOICE_LABEL}</span>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => setOpen((current) => !current)}
+          className="flex min-h-10 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border border-black/[0.06] bg-white px-2.5 py-2 text-left text-[12.5px] font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+        >
+          <span className={`truncate ${selected ? 'text-slate-900' : 'text-slate-500'}`}>{selected ? selected.name : GEMINI_VOICE_LABEL}</span>
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+        </button>
+        {sample && (
+          <button
+            type="button"
+            aria-label={playingId === sampleId ? `Jeda sampel ${selected.name}` : `Putar sampel ${selected.name}`}
+            onClick={() => onPlaySample(selected)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+          >
+            {playingId === sampleId ? <Pause className="h-3.5 w-3.5" fill="currentColor" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-black/[0.06] bg-white shadow-[0_12px_32px_rgba(15,23,42,0.16)]">
+          <div className="border-b border-black/[0.06] p-2">
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && shown[0]) {
+                  event.preventDefault();
+                  choose(shown[0].id);
+                }
+              }}
+              placeholder="Cari suara"
+              aria-label="Cari suara Gemini"
+              autoComplete="off"
+              enterKeyHint="search"
+              className="w-full rounded-lg border border-black/[0.06] px-2.5 py-2 text-[12.5px] font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+            />
+          </div>
+          <ul id={listId} role="listbox" aria-labelledby={`${listId}-label`} className="max-h-52 overflow-y-auto overscroll-contain">
+            {shown.length === 0 && <li className="px-3 py-2.5 text-[12px] font-semibold text-slate-500">Tidak ada suara yang cocok.</li>}
+            {shown.map((voice) => {
+              const active = voice.id === value;
+              return (
+                <li key={voice.id}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => choose(voice.id)}
+                    className={`flex min-h-10 w-full items-center justify-between gap-2 px-3 py-2 text-left text-[12.5px] focus:outline-none focus-visible:bg-emerald-50 ${active ? 'bg-emerald-50 font-extrabold text-emerald-900' : 'font-semibold text-slate-800'}`}
+                  >
+                    <span className="truncate">{voice.name}</span>
+                    {active && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ReferenceForm({ engine, rawAssets, minSeconds, onCancel, onCreated }) {
@@ -447,6 +554,10 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
   const fish = accounts.fish.fish || fishNow;
   const voices = accounts[engine]?.voices || [];
   const voiceId = voices.some((voice) => voice.id === picked[engine]) ? picked[engine] : (voices[0]?.id || '');
+  const profileParts = partitionProfiles(voices);
+  const createdVoices = engine === 'gemini' ? profileParts.created : voices;
+  const prebuiltVoices = engine === 'gemini' ? profileParts.prebuilt : [];
+  const prebuiltId = prebuiltVoices.some((voice) => voice.id === voiceId) ? voiceId : '';
 
   const counts = useMemo(() => {
     const map = new Map();
@@ -574,6 +685,16 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
     setPlayingId(item.id);
   }
 
+  function playVoiceSample(voice) {
+    const sample = voiceSample(voice);
+    if (!sample) return;
+    try {
+      togglePlay({ id: `sample:${voice.id}`, wav: base64ToBytes(sample.sampleWav) });
+    } catch {
+      setFormError('Sampel suara tidak bisa diputar.');
+    }
+  }
+
   function download(item) {
     const url = URL.createObjectURL(new Blob([wavBytes(item.wav)], { type: 'audio/wav' }));
     const link = document.createElement('a');
@@ -628,7 +749,7 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
 
       <div className={creating ? 'hidden lg:grid lg:grid-cols-[1.15fr_0.85fr] lg:items-start lg:gap-4' : 'lg:grid lg:grid-cols-[1.15fr_0.85fr] lg:items-start lg:gap-4'}>
         <div>
-          <section className="rounded-[20px] border border-black/[0.06] bg-white p-3.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">
+          <section className="relative z-20 rounded-[20px] border border-black/[0.06] bg-white p-3.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">
             <div className="flex items-start justify-between gap-2">
               <div>
                 <p className="text-[8.5px] font-extrabold uppercase tracking-[0.08em] text-slate-400">Suara tersimpan</p>
@@ -638,11 +759,11 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" /> {engine === 'gemini' ? 'Desain suara' : 'Buat profil suara'}
               </button>
             </div>
-            {voices.length === 0 && <p className="mt-3 text-[12px] font-semibold text-slate-500">{active.message || (engine === 'gemini' ? 'Pilih suara bawaan, atau desain suara baru.' : 'Belum ada profil di mesin ini.')}</p>}
-            {voices.map((voice, index) => (
+            {createdVoices.length === 0 && prebuiltVoices.length === 0 && <p className="mt-3 text-[12px] font-semibold text-slate-500">{active.message || (engine === 'gemini' ? 'Pilih suara bawaan, atau desain suara baru.' : 'Belum ada profil di mesin ini.')}</p>}
+            {createdVoices.map((voice, index) => (
               <div key={`${voice.engine}-${voice.id}`} className="flex items-center gap-2.5 border-t border-black/[0.06] py-2.5 first:border-t-0">
-                <button type="button" onClick={() => setPicked((current) => ({ ...current, [engine]: voice.id }))} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ${AVATAR_TONES[index % AVATAR_TONES.length]}`}>{initials(voice.name)}</span>
+                <button type="button" aria-pressed={voice.id === voiceId} onClick={() => setPicked((current) => ({ ...current, [engine]: voice.id }))} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                  <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ${AVATAR_TONES[index % AVATAR_TONES.length]} ${voice.id === voiceId ? 'ring-2 ring-emerald-600' : ''}`}>{initials(voice.name)}</span>
                   <span className="min-w-0">
                     <span className="block truncate text-[13px] font-extrabold">{voice.name}</span>
                     <span className="mt-0.5 block text-[11px] font-semibold text-slate-500">{counts.get(voice.id)?.count ? `${counts.get(voice.id).count} naskah · ${formatIdDate(counts.get(voice.id).latest)}` : voice.kind === 'prebuilt' ? 'Suara bawaan' : 'Belum dipakai'}</span>
@@ -654,6 +775,15 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
                 )}
               </div>
             ))}
+            {engine === 'gemini' && (
+              <GeminiVoiceSelect
+                voices={prebuiltVoices}
+                value={prebuiltId}
+                onChange={(id) => setPicked((current) => ({ ...current, gemini: id }))}
+                playingId={playingId}
+                onPlaySample={playVoiceSample}
+              />
+            )}
             <button type="button" disabled={createDisabled} onClick={() => setCreating(true)} className="mt-1 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-black/[0.06] px-3 py-2.5 text-[12.5px] font-extrabold disabled:opacity-40 lg:hidden">
               <Plus className="h-3.5 w-3.5" aria-hidden="true" /> {engine === 'gemini' ? 'Desain suara' : 'Buat profil suara'}
             </button>
