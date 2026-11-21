@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   TrendingUp, Video, Eye, RefreshCw, ExternalLink, Edit3, Sparkles, 
   LayoutDashboard, BarChart2, Bot,
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
-  Play, Smartphone, Package, CalendarClock
+  Play, Smartphone, Package, CalendarClock, Mic
 } from 'lucide-react';
 import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
@@ -16,6 +16,7 @@ import SearchBox from './SearchBox.jsx';
 import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import RekapProdukPanel from './RekapProdukPanel.jsx';
 import JadwalReplizPanel from './JadwalReplizPanel.jsx';
+import EditorVoicePanel from './EditorVoicePanel.jsx';
 import MobileShell, { MobileBotButton } from './MobileShell.jsx';
 import { MobileFyp, MobilePipeline, MobileProduk, MobileViolations } from './MobileViews.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
@@ -357,6 +358,8 @@ export default function App() {
   const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
   const [previewGallery, setPreviewGallery] = useState(null);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
+  const [voiceChrome, setVoiceChrome] = useState(null);
+  const voiceBackRef = useRef(() => {});
   const [mobileViolationForm, setMobileViolationForm] = useState(false);
 
   // STATE FILTER & PAGINATION ANALITIK FYP
@@ -1660,7 +1663,10 @@ export default function App() {
     produk: ['Rekap Produk', 'Jumlah upload, rata-rata view, dan kelompok view. Sumber: Data_View.'],
     pelanggaran: ['Pelanggaran', 'Catat teguran algoritma, bukti screenshot, dan status banding.'],
     sinkron: ['Sinkron Bot', 'Hubungkan OneDrive, lalu sinkronkan Video Final dan Mentahan.'],
+    voice: ['Editor Voice', 'Clone suara, tulis naskah, lalu unduh audionya.'],
   }[activeMenu] || ['Rekap Pipeline', ''];
+  const mobileTitle = activeMenu === 'voice' && voiceChrome ? voiceChrome.title : mobileCopy[0];
+  const mobileSubtitle = activeMenu === 'voice' && voiceChrome ? voiceChrome.subtitle : mobileCopy[1];
 
   const openMobileMenu = (id) => {
     if (id === 'jadwal') setJadwalMounted(true);
@@ -2028,11 +2034,20 @@ export default function App() {
 
       <MobileShell
         menu={activeMenu}
-        title={mobileCopy[0]}
-        subtitle={mobileCopy[1]}
+        title={mobileTitle}
+        subtitle={mobileSubtitle}
         refreshing={loading}
         onRefresh={fetchData}
-        headerAction={activeMenu === 'analitik' ? <MobileBotButton busy={isBotRunning || loading} onClick={runBotScraper} /> : null}
+        headerAction={activeMenu === 'voice' && voiceChrome?.back ? (
+          <button
+            type="button"
+            aria-label="Kembali"
+            onClick={() => voiceBackRef.current()}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[9px] text-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+          >
+            <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+          </button>
+        ) : activeMenu === 'analitik' ? <MobileBotButton busy={isBotRunning || loading} onClick={runBotScraper} /> : null}
         violationCount={violations.length}
         syncing={driveSync.syncing}
         sheetOpen={mobileSheetOpen}
@@ -2073,6 +2088,9 @@ export default function App() {
           </button>
           <button type="button" onClick={() => { setJadwalMounted(true); setActiveMenu('jadwal'); }} className={navTabClass(activeMenu === 'jadwal')}>
             <CalendarClock className="w-4 h-4" /> Jadwal Repliz
+          </button>
+          <button type="button" onClick={() => setActiveMenu('voice')} className={navTabClass(activeMenu === 'voice')}>
+            <Mic className="w-4 h-4" /> Editor Voice
           </button>
         </div>
 
@@ -3431,6 +3449,10 @@ export default function App() {
             dismissChangelog={driveSync.dismissChangelog}
           />
         </div>
+      )}
+
+      {activeMenu === 'voice' && (
+        <EditorVoicePanel rawAssets={rawAssets} onChromeChange={setVoiceChrome} backRef={voiceBackRef} />
       )}
 
       {jadwalMounted && (

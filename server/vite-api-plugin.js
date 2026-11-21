@@ -1,6 +1,7 @@
 import { handleAppsScriptRequest } from './apps-script.js';
 import { handleGeminiRequest } from './gemini.js';
 import { handleOneDriveLoginRequest, handleOneDriveStreamRequest, handleOneDriveSyncRequest } from './onedrive.js';
+import { handleVoiceRequest } from './voice.js';
 import { handleReplizAssetsRequest } from './repliz-assets.js';
 import { handleReplizMediaRequest } from './repliz-media.js';
 import { handleReplizPlanRequest } from './repliz-plan.js';
@@ -19,6 +20,7 @@ const ROUTES = new Map([
   ['/api/repliz-media', handleReplizMediaRequest],
   ['/api/repliz-plan', handleReplizPlanRequest],
   ['/api/repliz-assets', handleReplizAssetsRequest],
+  ['/api/voice', handleVoiceRequest],
 ]);
 
 const SKIP_HEADERS = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'keep-alive']);

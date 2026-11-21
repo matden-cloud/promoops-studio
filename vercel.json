@@ -6,6 +6,9 @@
     "api/gemini.js": {
       "maxDuration": 30
     },
+    "api/voice.js": {
+      "maxDuration": 60
+    },
     "api/tiktok-resolve.js": {
       "maxDuration": 15
     },
