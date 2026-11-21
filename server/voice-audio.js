@@ -194,22 +194,24 @@ export function waveformPeaks(samples, bucketCount) {
   return peaks;
 }
 
-export function initialSelection(duration) {
+export function initialSelection(duration, minSeconds = MIN_REFERENCE_SECONDS) {
   const seconds = Number(duration);
-  if (!Number.isFinite(seconds) || seconds < MIN_REFERENCE_SECONDS) return null;
+  const minimum = Number(minSeconds) || MIN_REFERENCE_SECONDS;
+  if (!Number.isFinite(seconds) || seconds < minimum) return null;
   const length = Math.min(20, seconds, MAX_REFERENCE_SECONDS);
   return { start: 0, end: length };
 }
 
-export function moveSelection(duration, nextStart, nextEnd) {
+export function moveSelection(duration, nextStart, nextEnd, minSeconds = MIN_REFERENCE_SECONDS) {
   const seconds = Number(duration);
-  if (!Number.isFinite(seconds) || seconds < MIN_REFERENCE_SECONDS) return null;
+  const minimum = Number(minSeconds) || MIN_REFERENCE_SECONDS;
+  if (!Number.isFinite(seconds) || seconds < minimum) return null;
   let start = Number(nextStart);
   let end = Number(nextEnd);
   if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
   let length = end - start;
   const maxLength = Math.min(MAX_REFERENCE_SECONDS, seconds);
-  if (length < MIN_REFERENCE_SECONDS) length = Math.min(MIN_REFERENCE_SECONDS, maxLength);
+  if (length < minimum) length = Math.min(minimum, maxLength);
   if (length > maxLength) length = maxLength;
   if (start < 0) start = 0;
   if (start + length > seconds) start = Math.max(0, seconds - length);
@@ -230,12 +232,14 @@ export function describeWavUpload(input, kind) {
   if (parsed.sampleRate < MIN_SAMPLE_RATE || parsed.sampleRate > MAX_SAMPLE_RATE) {
     throw new Error('WAV harus 16–24 kHz.');
   }
-  const min = kind === 'consent' ? MIN_CONSENT_SECONDS : MIN_REFERENCE_SECONDS;
-  const max = kind === 'consent' ? MAX_CONSENT_SECONDS : MAX_REFERENCE_SECONDS;
+  const ranges = {
+    consent: [MIN_CONSENT_SECONDS, MAX_CONSENT_SECONDS, 'Rekaman izin harus singkat, sekitar beberapa detik sampai 25 detik.'],
+    inworld: [3, MAX_REFERENCE_SECONDS, 'Referensi Inworld harus 3–30 detik.'],
+    fish: [MIN_REFERENCE_SECONDS, MAX_REFERENCE_SECONDS, 'Referensi harus 10–30 detik.'],
+  };
+  const [min, max, rangeMessage] = ranges[kind] || ranges.fish;
   if (parsed.duration < min - 0.05 || parsed.duration > max + 0.2) {
-    throw new Error(kind === 'consent'
-      ? 'Rekaman izin harus singkat, sekitar beberapa detik sampai 25 detik.'
-      : 'Referensi harus 10–30 detik.');
+    throw new Error(rangeMessage);
   }
   return parsed;
 }
