@@ -105,10 +105,11 @@ function mentahanChoices(rawAssets) {
   return rows;
 }
 
-function enginePath(engine) {
-  if (engine === 'fish') return '/api/fish';
-  if (engine === 'inworld') return '/api/inworld';
-  return '/api/voice';
+function enginePath(engine, extra = '') {
+  const params = new URLSearchParams(extra);
+  if (engine === 'fish' || engine === 'inworld') params.set('engine', engine);
+  const query = params.toString();
+  return query ? `/api/voice?${query}` : '/api/voice';
 }
 
 function FieldLabel({ children }) {
@@ -543,7 +544,7 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
     const target = pendingDelete;
     setPendingDelete(null);
     try {
-      const response = await fetch(`${enginePath(engine)}?id=${encodeURIComponent(target.id)}`, { method: 'DELETE' });
+      const response = await fetch(enginePath(engine, `id=${encodeURIComponent(target.id)}`), { method: 'DELETE' });
       const result = await readJson(response);
       if (!response.ok) throw new Error(failureText(result, 'Profil gagal dihapus.'));
       const next = await loadEngine(engine);

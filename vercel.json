@@ -9,12 +9,6 @@
     "api/voice.js": {
       "maxDuration": 60
     },
-    "api/fish.js": {
-      "maxDuration": 60
-    },
-    "api/inworld.js": {
-      "maxDuration": 60
-    },
     "api/tiktok-resolve.js": {
       "maxDuration": 15
     },

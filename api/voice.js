@@ -1,4 +1,4 @@
-import { handleVoiceRequest } from '../server/voice.js';
+import { handleVoiceRoute } from '../server/voice-route.js';
 
 export const config = {
   maxDuration: 60,
@@ -6,6 +6,6 @@ export const config = {
 
 export default {
   async fetch(request) {
-    return handleVoiceRequest(request);
+    return handleVoiceRoute(request);
   },
 };
