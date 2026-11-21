@@ -8,7 +8,7 @@ URL Web App Apps Script dan kunci Gemini tidak lagi ditulis di kode atau di Java
 
 1. Pasang dependensi: `npm install`
 2. Salin `.env.example` menjadi `.env`, lalu isi ketiga variabel wajib. `GEMINI_MODEL` boleh dikosongkan. File `.env` tidak boleh di-commit.
-3. Jalankan `npm run dev`. Vite ikut melayani `/api/apps-script`, `/api/gemini`, dan `/api/tiktok-resolve` dengan nilai dari `.env`.
+3. Jalankan `npm run dev`. Vite ikut melayani `/api/apps-script`, `/api/gemini`, `/api/voice`, dan `/api/tiktok-resolve` dengan nilai dari `.env`.
 4. `npm run build` membuat bundle produksi. `npm run preview` juga melayani endpoint itu. `npm test` menjalankan uji perantara dengan server tiruan.
 
 Fungsi `/api` membaca variabel lingkungan proses Node. Jangan memberi awalan yang membuat Vite menyisipkan nilainya ke bundle browser.
@@ -48,6 +48,8 @@ Tombol **Sinkron Video Final** dan **Sinkron Mentahan** di tab **Sinkron Bot** m
 `GET /api/onedrive-stream?id=<Id_File>` memutar file OneDrive di dalam dashboard. Id diperiksa, token diambil dengan cara yang sama seperti sinkron (`get_onedrive_token` / `save_onedrive_token`), lalu browser diarahkan ke tautan unduh singkat dari Microsoft. Token tidak dikirim ke browser.
 
 Tab **Jadwal Repliz** menyusun rencana upload TikTok dari Video Final, lalu mengirimnya ke Repliz hanya setelah tombol **Konfirmasi & kirim ke Repliz**. Chat Gemini (`/api/repliz-plan`) hanya mengisi tabel konfirmasi dan tidak membuat jadwal. URL yang dikirim ke Repliz adalah tautan bertanda tangan `/api/repliz-media`, bukan `downloadUrl` Microsoft yang singkat. Video produk Gantungan Bor ditahan dan tidak masuk ke rencana otomatis. Jika `REPLIZ_ACCESS_KEY`, `REPLIZ_SECRET_KEY`, atau `MEDIA_URL_SECRET` belum diisi, tab tetap terbuka dengan pesan konfigurasi.
+
+Tab **Editor Voice** hanya memakai mesin gratis. Replikasi suara Gemini dimatikan. Gemini tetap untuk suara bawaan dan desain suara lewat `/api/voice`. Fish Audio (`FISH_API_KEY`, model `s2.1-pro-free`) lewat `/api/voice?engine=fish` dan berhenti pada 1 Desember 2026 pukul 00.00 WIB. Inworld (`INWORLD_API_KEY`, model `inworld-tts-2-flash`) lewat `/api/voice?engine=inworld`; penghitung 65 menit ada di browser. Audio hasil tetap di IndexedDB. Kunci kosong menampilkan nama variabelnya dan tidak mematikan mesin lain. Ponsel membuka tab dari sheet **Lainnya**. Desktop menambah item nav **Editor Voice**. Kuota Gemini habis (HTTP 429) tetap dijelaskan sebagai batas harian.
 
 Model default adalah `gemini-3.5-flash-lite`, pengganti resmi `gemini-2.5-flash`. Google menandai `gemini-2.5-flash` deprecated: mulai 1 Desember 2026 permintaan ke model itu dialihkan ke `gemini-3.5-flash-lite`, dan akses model 2.5 dibatasi ke proyek yang sudah pernah memakainya. Nama lain bisa diisi lewat `GEMINI_MODEL`. Untuk `gemini-2.5-flash`, server mematikan thinking (`thinkingBudget` 0) supaya token keluaran tidak habis sebelum jawaban terbentuk. Model Gemini 3 memakai `thinkingLevel` rendah (`MINIMAL` pada Flash-Lite, `LOW` pada Flash lain) dan tidak menerima `temperature`. Batas `maxOutputTokens` adalah 2048. Jika Google menolak, respons memuat `detail` berisi status HTTP, `error.status`, dan `error.message` dari Google; kunci API disensor. Kunci dikirim dari server lewat header, tidak lewat query string.
 

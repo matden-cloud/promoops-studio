@@ -4,6 +4,7 @@ import {
   Bot,
   CalendarClock,
   LayoutDashboard,
+  Mic,
   MoreHorizontal,
   Package,
   Play,
@@ -56,7 +57,7 @@ export default function MobileShell({
 }) {
   const sheetRef = useRef(null);
   const [compact, setCompact] = useState(false);
-  const lainActive = menu === 'pelanggaran' || menu === 'sinkron';
+  const lainActive = menu === 'pelanggaran' || menu === 'sinkron' || menu === 'voice';
 
   useEffect(() => {
     const onScroll = () => setCompact(window.scrollY > 36);
@@ -78,7 +79,7 @@ export default function MobileShell({
       if (event.key === 'Escape') onCloseSheet();
     };
     window.addEventListener('keydown', onKey);
-    sheetRef.current?.querySelector('button')?.focus();
+    sheetRef.current?.querySelector('button')?.focus({ preventScroll: true });
     return () => {
       document.body.style.overflow = previous;
       window.removeEventListener('keydown', onKey);
@@ -166,6 +167,15 @@ export default function MobileShell({
             <div className="mx-auto mb-3 mt-1.5 h-1 w-10 rounded-full bg-[#d5dbd7]" />
             <h3 className="mb-1.5 text-[17px] font-extrabold tracking-tight text-slate-900">Lainnya</h3>
             <SheetRow
+              icon={Mic}
+              tone="bg-emerald-50 text-emerald-800"
+              title="Editor Voice"
+              detail="Clone suara dan buat naskah jadi audio"
+              badge="Baru"
+              highlight
+              onClick={() => onSelect('voice')}
+            />
+            <SheetRow
               icon={ShieldAlert}
               tone="bg-red-50 text-red-700"
               title="Pelanggaran"
@@ -203,12 +213,12 @@ export default function MobileShell({
   );
 }
 
-function SheetRow({ icon: Icon, tone, title, detail, count, busy, onClick }) {
+function SheetRow({ icon: Icon, tone, title, detail, count, badge, highlight, busy, onClick }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-3 border-t border-black/[0.06] px-0.5 py-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
+      className={`flex w-full items-center gap-3 py-3 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${highlight ? 'my-0.5 rounded-2xl border-[1.5px] border-emerald-400 bg-emerald-50 px-2.5' : 'border-t border-black/[0.06] px-0.5'}`}
     >
       <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[14px] ${tone}`}>
         <Icon className={`h-[18px] w-[18px] ${busy ? 'animate-spin' : ''}`} aria-hidden="true" />
@@ -217,6 +227,9 @@ function SheetRow({ icon: Icon, tone, title, detail, count, busy, onClick }) {
         <span className="block text-sm font-extrabold tracking-tight text-slate-900">{title}</span>
         <span className="mt-0.5 block text-[11.5px] font-medium text-slate-500">{detail}</span>
       </span>
+      {badge && (
+        <span className="ml-auto rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">{badge}</span>
+      )}
       {Number.isFinite(count) && (
         <span className="ml-auto rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-extrabold text-red-700">{count}</span>
       )}

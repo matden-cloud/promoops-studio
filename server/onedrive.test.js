@@ -943,5 +943,60 @@ describe('putar file OneDrive', () => {
     assert.equal(body.needsLogin, true);
     assertNoSecrets(JSON.stringify(body));
   });
+
+  test('proxy mengembalikan byte file tanpa menaruh URL unduh', async () => {
+    const { requestImpl } = scriptAndGraph(() => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ '@microsoft.graph.downloadUrl': DOWNLOAD }),
+    }));
+    const payload = Buffer.from('mentahan-audio');
+    let seen = '';
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc&proxy=1'),
+      {
+        env: streamEnv(),
+        requestImpl,
+        fetchImpl: async (url) => {
+          seen = url;
+          return new Response(payload, {
+            status: 200,
+            headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(payload.length) },
+          });
+        },
+      },
+    );
+    assert.equal(seen, DOWNLOAD);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('location'), null);
+    assert.equal(response.headers.get('content-type'), 'video/mp4');
+    assert.equal([...response.headers.values()].join('\n').includes(DOWNLOAD), false);
+    assert.equal(Buffer.from(await response.arrayBuffer()).toString(), 'mentahan-audio');
+    assertNoSecrets(seen);
+  });
+
+  test('proxy menolak file Mentahan yang terlalu besar', async () => {
+    const { requestImpl } = scriptAndGraph(() => ({
+      status: 200,
+      headers: {},
+      body: JSON.stringify({ '@microsoft.graph.downloadUrl': DOWNLOAD }),
+    }));
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc&proxy=1'),
+      {
+        env: streamEnv(),
+        requestImpl,
+        fetchImpl: async () => new Response('besar', {
+          status: 200,
+          headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(20 * 1024 * 1024) },
+        }),
+      },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 413);
+    assert.match(body.message, /terlalu besar/);
+    assert.equal(JSON.stringify(body).includes(DOWNLOAD), false);
+    assertNoSecrets(JSON.stringify(body));
+  });
 });
 

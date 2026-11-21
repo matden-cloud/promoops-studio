@@ -29,6 +29,7 @@ import {
 const SYNC_BUDGET_MS = 45_000;
 const SYNC_MAX_ITEMS = 80;
 const GRAPH_TIMEOUT_MS = 25_000;
+const MAX_PROXY_BYTES = 12 * 1024 * 1024;
 
 class HttpError extends Error {
   constructor(status, message, extra = {}) {
@@ -670,6 +671,39 @@ function redirect(location) {
   });
 }
 
+async function proxyPlayback(playback, fetchImpl) {
+  let upstream;
+  try {
+    upstream = await fetchImpl(playback, { redirect: 'follow' });
+  } catch {
+    throw new HttpError(502, 'File OneDrive tidak bisa diunduh.');
+  }
+  if (!upstream || !upstream.ok) throw new HttpError(502, 'File OneDrive tidak bisa diunduh.');
+  const declared = Number(upstream.headers.get('content-length') || 0);
+  if (Number.isFinite(declared) && declared > MAX_PROXY_BYTES) {
+    try {
+      await upstream.body?.cancel?.();
+    } catch {
+      // Ukuran sudah ditolak. Pembatalan body tidak boleh mengganti jawaban 413.
+    }
+    throw new HttpError(413, 'File Mentahan terlalu besar untuk dipotong di sini. Unggah potongan dari HP.');
+  }
+  const bytes = Buffer.from(await upstream.arrayBuffer());
+  if (bytes.length > MAX_PROXY_BYTES) {
+    throw new HttpError(413, 'File Mentahan terlalu besar untuk dipotong di sini. Unggah potongan dari HP.');
+  }
+  const type = String(upstream.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim() || 'application/octet-stream';
+  return new Response(bytes, {
+    status: 200,
+    headers: {
+      'Content-Type': type,
+      'Content-Length': String(bytes.length),
+      'Cache-Control': 'no-store',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
 function playbackUrlOrNull(value, secrets) {
   if (!isAllowedPlaybackUrl(value)) return null;
   for (const secret of secrets) {
@@ -765,18 +799,24 @@ export async function mintOneDriveDownloadUrl({ env, requestImpl, itemId }) {
 export async function handleOneDriveStreamRequest(request, deps = {}) {
   const env = deps.env || process.env;
   const requestImpl = deps.requestImpl || defaultRequest;
+  const fetchImpl = deps.fetchImpl || fetch;
   const secrets = [];
 
   try {
-    if (request.method.toUpperCase() !== 'GET' && request.method.toUpperCase() !== 'HEAD') {
+    const method = request.method.toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD') {
       throw new HttpError(405, 'Metode tidak diizinkan.');
     }
+    const url = new URL(request.url);
     const playback = await loadPlaybackUrl({
       env,
       requestImpl,
-      itemId: new URL(request.url).searchParams.get('id'),
+      itemId: url.searchParams.get('id'),
       secrets,
     });
+    if (method === 'GET' && url.searchParams.get('proxy') === '1') {
+      return await proxyPlayback(playback, fetchImpl);
+    }
     return redirect(playback);
   } catch (err) {
     return publicError(err, secrets);
