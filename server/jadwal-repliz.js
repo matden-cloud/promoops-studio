@@ -60,8 +60,13 @@ export const REPLIZ_ACCOUNT_MAP_KEY = 'promoops.replizAccountMap';
 
 // Handle yang normalisasinya tidak sama persis dengan nama MASTER_AKUN.
 // @pasar.digital79 → pasardigital, sedangkan "Pasar Digitals" → pasardigitals.
+// @grosirimportindonesia dan @jualkawatpembersihpipa juga tidak sama dengan
+// "Grosir Hitam" dan "Jual Kawat". Keduanya memakai Id_Akun yang masih kosong.
+// AKN_002, AKN_004, AKN_005, dan AKN_006 sudah terpakai akun lain.
 export const KNOWN_HANDLE_OVERRIDES = Object.freeze([
   { handle: 'pasar.digital79', id: 'AKN_005', nama: 'Pasar Digitals' },
+  { handle: 'grosirimportindonesia', id: 'AKN_003', nama: 'Grosir Hitam' },
+  { handle: 'jualkawatpembersihpipa', id: 'AKN_001', nama: 'Jual Kawat' },
 ]);
 
 export function normalizeAccountName(value) {
