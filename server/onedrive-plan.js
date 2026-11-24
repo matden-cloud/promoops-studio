@@ -5,13 +5,6 @@ export const ONEDRIVE_AUTHORITY = 'https://login.microsoftonline.com/common';
 export const ONEDRIVE_DEVICE_CODE_URL = `${ONEDRIVE_AUTHORITY}/oauth2/v2.0/devicecode`;
 export const ONEDRIVE_TOKEN_URL = `${ONEDRIVE_AUTHORITY}/oauth2/v2.0/token`;
 
-const MICROSOFT_API_HOSTS = ['login.microsoftonline.com', 'graph.microsoft.com'];
-
-export function isMicrosoftApiHost(hostname) {
-  const host = String(hostname || '').toLowerCase().replace(/\.$/, '');
-  return MICROSOFT_API_HOSTS.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
-}
-
 // Setara dengan scope MSAL script Python (Files.ReadWrite.All + offline_access).
 // Endpoint v2 butuh URI Microsoft Graph yang lengkap.
 export const ONEDRIVE_SCOPE = 'https://graph.microsoft.com/Files.ReadWrite.All offline_access';
