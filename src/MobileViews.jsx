@@ -14,6 +14,7 @@ import {
 import SearchBox from './SearchBox.jsx';
 import { canPlayTikTokUrl } from '../server/tiktok-url.js';
 import ViolationJenisPills from './ViolationJenisPills.jsx';
+import ViolationClampText from './ViolationClampText.jsx';
 import { formatViolationDate, violationPenyebab } from './violationDisplay.js';
 import {
   VIEW_BUCKETS,
@@ -472,7 +473,11 @@ export function MobileViolations({
             </select>
           </div>
           <div className="mt-1.5"><ViolationJenisPills jenis={item.jenis} /></div>
-          {violationPenyebab(item) && <p className="mt-1.5 text-[11px] font-medium leading-snug text-slate-600">Penyebab: {violationPenyebab(item)}</p>}
+          {violationPenyebab(item) && (
+            <div className="mt-1.5">
+              <ViolationClampText text={violationPenyebab(item)} label="Penyebab" className="text-slate-600" />
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {canPlayTikTokUrl(item.linkVideo) && (
               <button type="button" onClick={() => onPlay(item)} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1 text-[11px] font-extrabold text-white">
@@ -498,7 +503,11 @@ export function MobileViolations({
               <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => onAddShots(event, item.id)} />
             </label>
           </div>
-          {item.catatan && <p className="mt-2 text-[11px] font-medium leading-snug text-slate-500">Catatan: {item.catatan}</p>}
+          {item.catatan && item.catatan !== '-' && (
+            <div className="mt-2">
+              <ViolationClampText text={item.catatan} label="Evaluasi" className="text-slate-500" />
+            </div>
+          )}
         </article>
       ))}
     </div>
