@@ -37,7 +37,10 @@ describe('Gemini suara gratis', () => {
         if (target.searchParams.get('type') === 'prebuilt') {
           return jsonResponse({
             voices: [
-              { id: 'Kore', type: 'prebuilt', display_name: 'Kore' },
+              { id: 'Kore', type: 'prebuilt', display_name: 'Kore', gender: 'Female' },
+              { id: 'Bright Narrator', type: 'prebuilt', display_name: 'Bright Narrator', gender: 'neutral' },
+              { id: 'Tanpa Gender', type: 'prebuilt', display_name: 'Tanpa Gender' },
+              { id: 'Aneh', type: 'prebuilt', display_name: 'Aneh', gender: 'robot' },
               { id: 'voice_replika1234', type: 'replicated', display_name: 'Jangan' },
             ],
           });
@@ -51,9 +54,13 @@ describe('Gemini suara gratis', () => {
     const body = await response.json();
     assert.equal(body.configured, true);
     assert.deepEqual(types.sort(), ['prebuilt', 'prompted']);
-    assert.deepEqual(body.voices.map((voice) => voice.id), ['voice_desain99', 'Kore']);
+    assert.deepEqual(body.voices.map((voice) => voice.id), ['voice_desain99', 'Kore', 'Bright Narrator', 'Tanpa Gender', 'Aneh']);
     assert.equal(body.voices[0].kind, 'designed');
     assert.equal(body.voices[1].kind, 'prebuilt');
+    assert.equal(body.voices[1].gender, 'female');
+    assert.equal(body.voices[2].gender, 'neutral');
+    assert.equal(body.voices[3].gender, undefined);
+    assert.equal(body.voices[4].gender, undefined);
     assert.equal(body.voices.every((voice) => voice.engine === 'gemini'), true);
   });
 

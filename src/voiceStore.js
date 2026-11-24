@@ -34,6 +34,23 @@ export async function listVoiceResults() {
   }
 }
 
+export async function deleteVoiceResult(id) {
+  const key = typeof id === 'string' ? id.trim() : '';
+  if (!key) throw new Error('Hasil tidak valid.');
+  const db = await openDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error || new Error('IndexedDB gagal menghapus.'));
+      tx.onabort = () => reject(tx.error || new Error('IndexedDB dibatalkan.'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export async function saveVoiceResult(item) {
   const db = await openDb();
   try {

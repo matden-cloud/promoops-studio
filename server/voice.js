@@ -100,6 +100,13 @@ async function googleJson(fetchImpl, url, apiKey, init) {
   return result || {};
 }
 
+const API_GENDER = new Set(['female', 'male', 'neutral']);
+
+function publicGender(voice) {
+  const raw = text(voice?.gender).toLowerCase();
+  return API_GENDER.has(raw) ? raw : '';
+}
+
 function publicVoice(voice, kind) {
   const id = text(voice?.id);
   const type = text(voice?.type).toLowerCase();
@@ -109,12 +116,14 @@ function publicVoice(voice, kind) {
   } else if (!PREBUILT_ID.test(id) || id.startsWith('voice_')) {
     return null;
   }
+  const gender = publicGender(voice);
   return {
     id,
     name: text(voice?.display_name).slice(0, MAX_NAME_CHARS) || id,
     engine: 'gemini',
     kind,
     status: 'ready',
+    ...(gender ? { gender } : {}),
   };
 }
 
