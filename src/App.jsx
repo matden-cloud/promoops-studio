@@ -17,6 +17,16 @@ import { StarHistoryBadge, StarMonthCompare } from './StarMonthPanel.jsx';
 import RekapProdukPanel from './RekapProdukPanel.jsx';
 import JadwalReplizPanel from './JadwalReplizPanel.jsx';
 import EditorVoicePanel from './EditorVoicePanel.jsx';
+import ViolationNoticeReader from './ViolationNoticeReader.jsx';
+import {
+  NOTICE_FIELD_LABELS,
+  NOTICE_FIELD_ORDER,
+  accountOptionValue,
+  appendNoticeShot,
+  applyNoticeFields,
+  imageFileFromClipboard,
+  sheetTanggal,
+} from './violationNotice.js';
 import AppBrand from './AppBrand.jsx';
 import MobileShell, { MobileBotButton } from './MobileShell.jsx';
 import { MobileFyp, MobilePipeline, MobileProduk, MobileViolations } from './MobileViews.jsx';
@@ -70,6 +80,7 @@ const EMPTY_VIOLATION_FORM = {
   jenis: '', 
   status: 'Belum Banding',
   catatan: '', 
+  tanggal: '',
   linkVideo: '', 
   screenshots: []
 };
@@ -272,6 +283,21 @@ function FileLinkActions({ file, onPlay }) {
 }
 
 
+function violationInputClass(active, custom = false) {
+  if (active) return 'bg-white border-2 border-emerald-400 ring-2 ring-emerald-100 text-gray-800 text-sm rounded-lg p-2.5 font-semibold w-full';
+  if (custom) return 'bg-white border-2 border-red-400 text-gray-800 text-sm rounded-lg p-2 font-semibold w-full';
+  return 'bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold w-full';
+}
+
+function AutoFilledMark({ active, id }) {
+  if (!active) return null;
+  return (
+    <span id={id} className="mb-1 inline-flex items-center gap-1 text-[10px] font-extrabold text-emerald-700">
+      <Sparkles className="h-3 w-3" aria-hidden="true" /> Terisi otomatis
+    </span>
+  );
+}
+
 function navTabClass(active, tone = 'emerald') {
   const base = 'whitespace-nowrap shrink-0 px-3 py-2.5 lg:px-3 lg:py-2 text-sm font-semibold rounded-md inline-flex items-center gap-1.5 border';
   if (!active) {
@@ -357,6 +383,11 @@ export default function App() {
   const [violationTypes, setViolationTypes] = useState(DEFAULT_VIOLATION_TYPES);
   const [isCustomJenis, setIsCustomJenis] = useState(false);
   const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
+  const [autoFilled, setAutoFilled] = useState({});
+  const [noticeKey, setNoticeKey] = useState(0);
+  const violationFormRef = useRef(EMPTY_VIOLATION_FORM);
+  const readNoticeRef = useRef(() => {});
+  const noticeApplyRef = useRef(() => ({ labels: [] }));
   const [previewGallery, setPreviewGallery] = useState(null);
   const [mobileSheetOpen, setMobileSheetOpen] = useState(false);
   const [voiceChrome, setVoiceChrome] = useState(null);
@@ -1289,18 +1320,48 @@ export default function App() {
         url: compressedBase64
       });
     }
-    setNewViolation(prev => ({
+    const prev = violationFormRef.current;
+    commitViolation({
       ...prev,
-      screenshots: [...(prev.screenshots || []), ...newImages]
-    }));
+      screenshots: [...(prev.screenshots || []), ...newImages],
+    });
     e.target.value = '';
   };
 
+  const commitViolation = (next) => {
+    violationFormRef.current = next;
+    setNewViolation(next);
+  };
+
+  const patchViolation = (patch) => {
+    commitViolation({ ...violationFormRef.current, ...patch });
+    setAutoFilled((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const key of Object.keys(patch)) {
+        if (next[key]) {
+          delete next[key];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  };
+
+  const resetViolationForm = () => {
+    setEditingViolationId(null);
+    setIsCustomJenis(false);
+    commitViolation(EMPTY_VIOLATION_FORM);
+    setAutoFilled({});
+    setNoticeKey((value) => value + 1);
+  };
+
   const handleRemoveFormScreenshot = (ssId) => {
-    setNewViolation(prev => ({
+    const prev = violationFormRef.current;
+    commitViolation({
       ...prev,
-      screenshots: (prev.screenshots || []).filter(item => item.id !== ssId)
-    }));
+      screenshots: (prev.screenshots || []).filter(item => item.id !== ssId),
+    });
   };
 
   const handleQuickAddScreenshotsToRow = async (e, rowId) => {
@@ -1341,12 +1402,15 @@ export default function App() {
       setViolationTypes(prev => [...prev, item.jenis]);
     }
     setIsCustomJenis(false);
-    setNewViolation({
+    setAutoFilled({});
+    setNoticeKey((value) => value + 1);
+    commitViolation({
       akun: item.akun || '',
       produk: item.produk || '',
       jenis: item.jenis || '',
       status: item.status || 'Belum Banding',
       catatan: item.catatan === '-' ? '' : (item.catatan || ''),
+      tanggal: normalizeDateToIso(item.tanggal),
       linkVideo: item.linkVideo || '',
       screenshots: getViolationScreenshots(item)
     });
@@ -1357,10 +1421,27 @@ export default function App() {
   };
 
   const handleCancelEditViolation = () => {
-    setEditingViolationId(null);
-    setIsCustomJenis(false);
-    setNewViolation(EMPTY_VIOLATION_FORM);
+    resetViolationForm();
   };
+
+  const handleNoticeApply = ({ fields, image, error }) => {
+    const base = appendNoticeShot(violationFormRef.current, image, createClientId('notice'));
+    if (error || !fields) {
+      commitViolation(base);
+      return { labels: [] };
+    }
+    const applied = applyNoticeFields(base, fields, {
+      accounts: accountOptions,
+      types: violationTypes,
+    });
+    commitViolation(applied.form);
+    setAutoFilled((prev) => ({ ...prev, ...applied.filled }));
+    if (applied.filled.jenis) setIsCustomJenis(Boolean(applied.customJenis));
+    return { labels: applied.labels };
+  };
+  useEffect(() => {
+    noticeApplyRef.current = handleNoticeApply;
+  });
 
   const handleQuickStatusChange = async (id, newStatus) => {
     const targetItem = violations.find(v => v.id === id);
@@ -1381,9 +1462,10 @@ export default function App() {
 
   const handleAddViolation = async (e) => {
     e.preventDefault();
-    if (!newViolation.akun || !newViolation.produk || !newViolation.jenis) return;
+    const form = violationFormRef.current;
+    if (!form.akun || !form.produk || !form.jenis) return;
 
-    const cleanJenis = newViolation.jenis.trim();
+    const cleanJenis = form.jenis.trim();
     if (!violationTypes.includes(cleanJenis)) {
       setViolationTypes(prev => [...prev, cleanJenis]);
     }
@@ -1393,19 +1475,18 @@ export default function App() {
       const existingItem = violations.find(v => v.id === editingViolationId);
       const updatedEntry = {
         id: editingViolationId,
-        tanggal: existingItem?.tanggal || new Date().toLocaleDateString('id-ID'),
-        akun: newViolation.akun,
-        produk: newViolation.produk,
+        tanggal: sheetTanggal(form.tanggal) || existingItem?.tanggal || new Date().toLocaleDateString('id-ID'),
+        akun: form.akun,
+        produk: form.produk,
         jenis: cleanJenis,
-        status: newViolation.status || 'Belum Banding',
-        linkVideo: newViolation.linkVideo || '',
-        screenshots: newViolation.screenshots || [],
-        catatan: newViolation.catatan || '-'
+        status: form.status || 'Belum Banding',
+        linkVideo: form.linkVideo || '',
+        screenshots: form.screenshots || [],
+        catatan: form.catatan || '-'
       };
 
       setViolations(prev => prev.map(v => v.id === editingViolationId ? updatedEntry : v));
-      setEditingViolationId(null);
-      setNewViolation(EMPTY_VIOLATION_FORM);
+      resetViolationForm();
 
       try {
         await fetch(APPS_SCRIPT_ENDPOINT, {
@@ -1419,21 +1500,20 @@ export default function App() {
       return;
     }
 
-    const today = new Date().toLocaleDateString('id-ID');
     const newEntry = {
       id: createClientId(),
-      tanggal: today,
-      akun: newViolation.akun,
-      produk: newViolation.produk,
+      tanggal: sheetTanggal(form.tanggal) || new Date().toLocaleDateString('id-ID'),
+      akun: form.akun,
+      produk: form.produk,
       jenis: cleanJenis,
-      status: newViolation.status || 'Belum Banding',
-      linkVideo: newViolation.linkVideo || '',
-      screenshots: newViolation.screenshots || [],
-      catatan: newViolation.catatan || '-'
+      status: form.status || 'Belum Banding',
+      linkVideo: form.linkVideo || '',
+      screenshots: form.screenshots || [],
+      catatan: form.catatan || '-'
     };
 
     setViolations([newEntry, ...violations]);
-    setNewViolation(EMPTY_VIOLATION_FORM);
+    resetViolationForm();
 
     try {
       await fetch(APPS_SCRIPT_ENDPOINT, {
@@ -1662,12 +1742,15 @@ export default function App() {
     analitik: ['Laporan FYP', 'Saring data, pantau view, dan jalankan bot scraper.'],
     jadwal: ['Jadwal Repliz', 'Pilih akun, lalu produk dan video menyesuaikan.'],
     produk: ['Rekap Produk', 'Jumlah upload, rata-rata view, dan kelompok view. Sumber: Data_View.'],
-    pelanggaran: ['Pelanggaran', 'Catat teguran algoritma, bukti screenshot, dan status banding.'],
+    pelanggaran: ['Pelanggaran', 'Baca screenshot teguran, periksa isian, lalu simpan.'],
     sinkron: ['Sinkron Bot', 'Hubungkan OneDrive, lalu sinkronkan Video Final dan Mentahan.'],
     voice: ['Editor Voice', 'Clone suara, tulis naskah, lalu unduh audionya.'],
   }[activeMenu] || ['Rekap Pipeline', ''];
   const mobileTitle = activeMenu === 'voice' && voiceChrome ? voiceChrome.title : mobileCopy[0];
   const mobileSubtitle = activeMenu === 'voice' && voiceChrome ? voiceChrome.subtitle : mobileCopy[1];
+
+  const autoLabels = NOTICE_FIELD_ORDER.filter((key) => autoFilled[key]).map((key) => NOTICE_FIELD_LABELS[key]);
+  const akunInList = accountOptions.some((acc) => accountOptionValue(acc) === newViolation.akun);
 
   const openMobileMenu = (id) => {
     if (id === 'jadwal') setJadwalMounted(true);
@@ -3130,9 +3213,8 @@ export default function App() {
             items={violations.map((item) => ({ ...item, shots: getViolationScreenshots(item) }))}
             formOpen={mobileViolationForm || editingViolationId !== null}
             onCreate={() => {
+              resetViolationForm();
               setMobileViolationForm(true);
-              setEditingViolationId(null);
-              setNewViolation(EMPTY_VIOLATION_FORM);
               requestAnimationFrame(() => {
                 document.getElementById('formulir-pelanggaran')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
               });
@@ -3147,10 +3229,21 @@ export default function App() {
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
-            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, tambah jenis pelanggaran baru kapan saja, dan upload banyak bukti screenshot sekaligus.</p>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, baca screenshot pemberitahuan, lalu periksa isian sebelum simpan.</p>
           </div>
 
-          <form id="formulir-pelanggaran" onSubmit={handleAddViolation} className={`bg-white p-5 rounded-2xl shadow-sm border mb-6 print:hidden transition-colors ${editingViolationId !== null ? 'border-amber-400 ring-2 ring-amber-100' : 'border-red-200'} ${mobileViolationForm || editingViolationId !== null ? '' : 'max-lg:hidden'}`}>
+          <form
+            id="formulir-pelanggaran"
+            onSubmit={handleAddViolation}
+            data-terisi-otomatis={autoLabels.join(' ')}
+            onPaste={(event) => {
+              const file = imageFileFromClipboard(event);
+              if (!file) return;
+              event.preventDefault();
+              readNoticeRef.current(file);
+            }}
+            className={`bg-white p-5 rounded-2xl shadow-sm border mb-6 print:hidden transition-colors ${editingViolationId !== null ? 'border-amber-400 ring-2 ring-amber-100' : 'border-red-200'} ${mobileViolationForm || editingViolationId !== null ? '' : 'max-lg:hidden'}`}
+          >
             <div className="flex items-center justify-between mb-3">
               <h3 className="font-bold text-gray-900 text-sm flex items-center gap-2">
                 {editingViolationId !== null ? (
@@ -3166,91 +3259,144 @@ export default function App() {
               )}
             </div>
 
+            <ViolationNoticeReader
+              key={noticeKey}
+              accounts={accountOptions}
+              types={violationTypes}
+              onApply={(payload) => noticeApplyRef.current(payload)}
+              onReady={(readFile) => { readNoticeRef.current = readFile; }}
+            />
+
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-              <select 
-                value={newViolation.akun} 
-                onChange={(e) => setNewViolation({...newViolation, akun: e.target.value})}
-                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
-                required
-              >
-                <option value="">Pilih Akun Toko Terdampak...</option>
-                {accountOptions.map(acc => (
-                  <option key={acc.id} value={`${acc.label}${acc.pemegang ? ` (${acc.pemegang})` : ''}`}>
-                    {acc.label}{acc.pemegang ? ` (${acc.pemegang})` : ''}
-                  </option>
-                ))}
-              </select>
-
-              <input 
-                type="text" 
-                placeholder="Nama Produk (mis: Pisau Mesin)..."
-                value={newViolation.produk}
-                onChange={(e) => setNewViolation({...newViolation, produk: e.target.value})}
-                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
-                required
-              />
-
-              {!isCustomJenis ? (
-                <select 
-                  value={newViolation.jenis}
-                  onChange={(e) => {
-                    if (e.target.value === '__TAMBAH_BARU__') {
-                      setIsCustomJenis(true);
-                      setNewViolation({...newViolation, jenis: ''});
-                    } else {
-                      setNewViolation({...newViolation, jenis: e.target.value});
-                    }
-                  }}
-                  className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
+              <div className="flex min-w-0 flex-col">
+                <AutoFilledMark active={!!autoFilled.akun} id="auto-akun" />
+                <select
+                  aria-label="Akun toko terdampak"
+                  aria-describedby={autoFilled.akun ? 'auto-akun' : undefined}
+                  value={newViolation.akun}
+                  onChange={(e) => patchViolation({ akun: e.target.value })}
+                  className={violationInputClass(!!autoFilled.akun)}
                   required
                 >
-                  <option value="">Jenis Pelanggaran...</option>
-                  {violationTypes.map((type, idx) => (
-                    <option key={idx} value={type}>{type}</option>
+                  <option value="">Pilih Akun Toko Terdampak...</option>
+                  {!akunInList && newViolation.akun && (
+                    <option value={newViolation.akun}>{newViolation.akun}</option>
+                  )}
+                  {accountOptions.map(acc => (
+                    <option key={acc.id} value={accountOptionValue(acc)}>
+                      {accountOptionValue(acc)}
+                    </option>
                   ))}
-                  <option value="__TAMBAH_BARU__" className="font-bold text-red-600 bg-red-50">
-                    + Ketik Jenis Pelanggaran Baru...
-                  </option>
                 </select>
-              ) : (
-                <div className="flex gap-1">
-                  <input 
-                    type="text"
-                    placeholder="Ketik jenis pelanggaran baru..."
+              </div>
+
+              <div className="flex min-w-0 flex-col">
+                <AutoFilledMark active={!!autoFilled.produk} id="auto-produk" />
+                <input
+                  type="text"
+                  aria-label="Nama produk"
+                  aria-describedby={autoFilled.produk ? 'auto-produk' : undefined}
+                  placeholder="Nama Produk (mis: Pisau Mesin)..."
+                  value={newViolation.produk}
+                  onChange={(e) => patchViolation({ produk: e.target.value })}
+                  className={violationInputClass(!!autoFilled.produk)}
+                  required
+                />
+              </div>
+
+              {!isCustomJenis ? (
+                <div className="flex min-w-0 flex-col">
+                  <AutoFilledMark active={!!autoFilled.jenis} id="auto-jenis" />
+                  <select
+                    aria-label="Jenis pelanggaran"
+                    aria-describedby={autoFilled.jenis ? 'auto-jenis' : undefined}
                     value={newViolation.jenis}
-                    onChange={(e) => setNewViolation({...newViolation, jenis: e.target.value})}
-                    className="bg-white border-2 border-red-400 text-gray-800 text-sm rounded-lg p-2 font-semibold w-full"
-                    autoFocus
+                    onChange={(e) => {
+                      if (e.target.value === '__TAMBAH_BARU__') {
+                        setIsCustomJenis(true);
+                        patchViolation({ jenis: '' });
+                      } else {
+                        patchViolation({ jenis: e.target.value });
+                      }
+                    }}
+                    className={violationInputClass(!!autoFilled.jenis)}
                     required
-                  />
-                  <button 
-                    type="button"
-                    onClick={() => setIsCustomJenis(false)}
-                    className="px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-bold shrink-0"
                   >
-                    Batal
-                  </button>
+                    <option value="">Jenis Pelanggaran...</option>
+                    {violationTypes.map((type, idx) => (
+                      <option key={idx} value={type}>{type}</option>
+                    ))}
+                    <option value="__TAMBAH_BARU__" className="font-bold text-red-600 bg-red-50">
+                      + Ketik Jenis Pelanggaran Baru...
+                    </option>
+                  </select>
+                </div>
+              ) : (
+                <div className="flex min-w-0 flex-col">
+                  <AutoFilledMark active={!!autoFilled.jenis} id="auto-jenis" />
+                  <div className="flex gap-1">
+                    <input
+                      type="text"
+                      aria-label="Jenis pelanggaran baru"
+                      aria-describedby={autoFilled.jenis ? 'auto-jenis' : undefined}
+                      placeholder="Ketik jenis pelanggaran baru..."
+                      value={newViolation.jenis}
+                      onChange={(e) => patchViolation({ jenis: e.target.value })}
+                      className={violationInputClass(!!autoFilled.jenis, true)}
+                      autoFocus
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomJenis(false)}
+                      className="px-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg text-xs font-bold shrink-0"
+                    >
+                      Batal
+                    </button>
+                  </div>
                 </div>
               )}
 
-              <select 
-                value={newViolation.status}
-                onChange={(e) => setNewViolation({...newViolation, status: e.target.value})}
-                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
-              >
-                <option value="Belum Banding">⏳ Status: Belum Banding</option>
-                <option value="Menunggu Banding">🕒 Status: Menunggu Banding</option>
-                <option value="Banding Diterima">✅ Status: Banding Diterima</option>
-                <option value="Banding Ditolak">❌ Status: Banding Ditolak</option>
-              </select>
+              <div className="flex min-w-0 flex-col">
+                <AutoFilledMark active={!!autoFilled.status} id="auto-status" />
+                <select
+                  aria-label="Status banding"
+                  aria-describedby={autoFilled.status ? 'auto-status' : undefined}
+                  value={newViolation.status}
+                  onChange={(e) => patchViolation({ status: e.target.value })}
+                  className={violationInputClass(!!autoFilled.status)}
+                >
+                  <option value="Belum Banding">⏳ Status: Belum Banding</option>
+                  <option value="Menunggu Banding">🕒 Status: Menunggu Banding</option>
+                  <option value="Banding Diterima">✅ Status: Banding Diterima</option>
+                  <option value="Banding Ditolak">❌ Status: Banding Ditolak</option>
+                </select>
+              </div>
 
-              <input 
-                type="url" 
-                placeholder="Link Video TikTok (https://tiktok.com/...)..."
-                value={newViolation.linkVideo}
-                onChange={(e) => setNewViolation({...newViolation, linkVideo: e.target.value})}
-                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
-              />
+              <label className="flex min-w-0 flex-col" htmlFor="pelanggaran-tanggal">
+                <span className="mb-1 text-[10px] font-bold text-slate-500">Tanggal pelanggaran</span>
+                <AutoFilledMark active={!!autoFilled.tanggal} id="auto-tanggal" />
+                <input
+                  id="pelanggaran-tanggal"
+                  type="date"
+                  aria-describedby={autoFilled.tanggal ? 'auto-tanggal' : undefined}
+                  value={newViolation.tanggal}
+                  onChange={(e) => patchViolation({ tanggal: e.target.value })}
+                  className={violationInputClass(!!autoFilled.tanggal)}
+                />
+              </label>
+
+              <label className="flex min-w-0 flex-col" htmlFor="pelanggaran-link">
+                <span className="mb-1 text-[10px] font-bold text-slate-500">Tautan video, isi sendiri</span>
+                <input
+                  id="pelanggaran-link"
+                  type="url"
+                  placeholder="Link Video TikTok (https://tiktok.com/...)..."
+                  value={newViolation.linkVideo}
+                  onChange={(e) => patchViolation({ linkVideo: e.target.value })}
+                  className={violationInputClass(false)}
+                />
+              </label>
 
               <div className="flex gap-1.5 sm:col-span-2">
                 <select
@@ -3273,13 +3419,18 @@ export default function App() {
                 </label>
               </div>
 
-              <input 
-                type="text" 
-                placeholder="Catatan perbaikan untuk tim..."
-                value={newViolation.catatan}
-                onChange={(e) => setNewViolation({...newViolation, catatan: e.target.value})}
-                className="bg-gray-50 border border-gray-200 text-gray-800 text-sm rounded-lg p-2.5 font-semibold"
-              />
+              <div className="flex min-w-0 flex-col sm:col-span-2">
+                <AutoFilledMark active={!!autoFilled.catatan} id="auto-catatan" />
+                <input
+                  type="text"
+                  aria-label="Catatan perbaikan"
+                  aria-describedby={autoFilled.catatan ? 'auto-catatan' : undefined}
+                  placeholder="Catatan perbaikan untuk tim..."
+                  value={newViolation.catatan}
+                  onChange={(e) => patchViolation({ catatan: e.target.value })}
+                  className={violationInputClass(!!autoFilled.catatan)}
+                />
+              </div>
             </div>
 
             {newViolation.screenshots && newViolation.screenshots.length > 0 && (
@@ -3305,7 +3456,13 @@ export default function App() {
               </div>
             )}
 
-            <div className="flex items-center gap-2">
+            {autoLabels.length > 0 && (
+              <p className="mb-3 text-xs font-semibold leading-relaxed text-emerald-800">
+                Terisi otomatis: {autoLabels.join(', ')}. Periksa dan ubah bila perlu, lalu simpan. Tautan video diisi sendiri.
+              </p>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
               <button type="submit" className={`${editingViolationId !== null ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm`}>
                 {editingViolationId !== null ? 'Simpan Perubahan Edit' : 'Simpan Data Pelanggaran'}
               </button>
