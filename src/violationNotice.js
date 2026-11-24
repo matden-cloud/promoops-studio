@@ -1,10 +1,11 @@
-export const NOTICE_FIELD_ORDER = ['akun', 'produk', 'jenis', 'tanggal', 'catatan', 'status'];
+export const NOTICE_FIELD_ORDER = ['akun', 'produk', 'jenis', 'tanggal', 'penyebab', 'catatan', 'status'];
 
 export const NOTICE_FIELD_LABELS = {
   akun: 'akun',
   produk: 'produk',
   jenis: 'jenis pelanggaran',
   tanggal: 'tanggal',
+  penyebab: 'penyebab',
   catatan: 'catatan',
   status: 'status banding',
 };
@@ -121,6 +122,11 @@ export function applyNoticeFields(form, fields, { accounts = [], types = [] } = 
   if (tanggal) {
     next.tanggal = tanggal;
     filled.tanggal = true;
+  }
+  const penyebab = cleanField(source.penyebab, 500);
+  if (penyebab) {
+    next.penyebab = penyebab;
+    filled.penyebab = true;
   }
   const catatan = cleanField(source.catatan, 500);
   if (catatan) {
