@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
+import dns from 'node:dns';
+import { EventEmitter } from 'node:events';
 import { readFileSync } from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import path from 'node:path';
-import { describe, test } from 'node:test';
+import { Readable } from 'node:stream';
+import { describe, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { POST_ACTIONS, handleAppsScriptRequest } from './apps-script.js';
-import { handleOneDriveLoginRequest, handleOneDriveStreamRequest, handleOneDriveSyncRequest } from './onedrive.js';
+import { handleOneDriveLoginRequest, handleOneDriveStreamRequest, handleOneDriveSyncRequest, mintOneDriveDownloadUrl } from './onedrive.js';
 import {
   FILE_ASSET_COLUMNS,
   ONEDRIVE_AUTHORITY,
@@ -14,6 +19,7 @@ import {
   isAllowedChildrenUrl,
   isAllowedGraphRead,
   isAllowedPlaybackUrl,
+  isMicrosoftApiHost,
   normalizeStats,
   oneDrivePathFolder,
   planDriveItem,
@@ -265,6 +271,13 @@ describe('rencana file OneDrive', () => {
     assert.equal(rootGraphUrl(FINAL), `https://graph.microsoft.com/v1.0/me/drive/root:/${FINAL.replaceAll(' ', '%20')}`);
     assert.equal(ONEDRIVE_TARGETS.mentahan.path, MENTAHAN);
     assert.equal(FILE_ASSET_COLUMNS.length, 17);
+    assert.equal(isMicrosoftApiHost('login.microsoftonline.com'), true);
+    assert.equal(isMicrosoftApiHost('graph.microsoft.com'), true);
+    assert.equal(isMicrosoftApiHost('south.graph.microsoft.com'), true);
+    assert.equal(isMicrosoftApiHost('login.microsoftonline.com.'), true);
+    assert.equal(isMicrosoftApiHost('login.microsoftonline.com.evil.test'), false);
+    assert.equal(isMicrosoftApiHost('notlogin.microsoftonline.com'), false);
+    assert.equal(isMicrosoftApiHost('script.google.com'), false);
   });
 
   test('jenis file mengikuti ekstensi script', () => {
@@ -760,6 +773,90 @@ describe('masuk OneDrive', () => {
     assert.match(body.message, /Allow public client flows/);
     assert.match(body.message, /akun Microsoft pribadi/);
   });
+
+  test('koneksi yang putus diulang, balasan 4xx tidak', async () => {
+    const { requestImpl: base } = makeWorld({ refreshToken: '' });
+    const attempts = [];
+    let hits = 0;
+    const requestImpl = async (url, options) => {
+      if (new URL(url).hostname === 'login.microsoftonline.com') {
+        hits += 1;
+        attempts.push(options.microsoftAttempt);
+        if (hits < 3) {
+          const error = new Error('socket hang up');
+          error.code = 'ECONNRESET';
+          throw error;
+        }
+      }
+      return base(url, options);
+    };
+    const started = await handleOneDriveLoginRequest(new Request('http://dashboard.local/api/onedrive-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start' }),
+    }), { env: env(), requestImpl, now: () => 1_700_000_000_000 });
+    const startBody = await started.json();
+    assert.equal(started.status, 200, JSON.stringify(startBody));
+    assert.equal(startBody.userCode, 'ABCD-EFGH');
+    assert.deepEqual(attempts, [0, 1, 2]);
+
+    let deniedHits = 0;
+    const { requestImpl: deniedBase } = makeWorld({ loginMode: 'invalid_client' });
+    const deniedImpl = async (url, options) => {
+      if (new URL(url).hostname === 'login.microsoftonline.com') deniedHits += 1;
+      return deniedBase(url, options);
+    };
+    const denied = await handleOneDriveLoginRequest(new Request('http://dashboard.local/api/onedrive-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'start' }),
+    }), { env: env(), requestImpl: deniedImpl });
+    const deniedBody = await denied.json();
+    assert.equal(denied.status, 502);
+    assert.equal(deniedHits, 1);
+    assert.match(deniedBody.message, /Allow public client flows/);
+    assert.equal(deniedBody.message.includes('ECONNRESET'), false);
+  });
+
+  test('pesan koneksi memuat kode dan menyensor rahasia', async () => {
+    const { world, requestImpl: base } = makeWorld({ refreshToken: '' });
+    world.keys.device_code = DEVICE_CODE;
+    world.keys.device_expires = String(Date.now() + 60_000);
+    const logs = [];
+    const original = console.error;
+    console.error = (...args) => {
+      logs.push(args.map((item) => String(item)).join(' '));
+    };
+    let hits = 0;
+    try {
+      const requestImpl = async (url, options) => {
+        if (new URL(url).hostname === 'login.microsoftonline.com') {
+          hits += 1;
+          const error = new Error(`putus ${DEVICE_CODE} Bearer ${ACCESS}`);
+          error.code = 'ECONNRESET';
+          throw error;
+        }
+        return base(url, options);
+      };
+      const response = await handleOneDriveLoginRequest(new Request('http://dashboard.local/api/onedrive-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'poll' }),
+      }), { env: env(), requestImpl, now: () => Date.now() });
+      const body = await response.json();
+      assert.equal(response.status, 502);
+      assert.equal(hits, 3);
+      assert.match(body.message, /Gagal menghubungi Microsoft/);
+      assert.match(body.message, /ECONNRESET/);
+      const shown = `${JSON.stringify(body)}\n${logs.join('\n')}`;
+      assert.equal(shown.includes(DEVICE_CODE), false);
+      assert.equal(shown.includes(ACCESS), false);
+      assert.equal(shown.includes(APPS_TOKEN), false);
+      assert.match(logs.join('\n'), /login\.microsoftonline\.com percobaan 3\/3 ECONNRESET/);
+    } finally {
+      console.error = original;
+    }
+  });
 });
 
 describe('batas aman', () => {
@@ -997,6 +1094,118 @@ describe('putar file OneDrive', () => {
     assert.match(body.message, /terlalu besar/);
     assert.equal(JSON.stringify(body).includes(DOWNLOAD), false);
     assertNoSecrets(JSON.stringify(body));
+  });
+
+  test('timeout tidak diulang dan kodenya ikut di pesan', async () => {
+    let graphHits = 0;
+    const { requestImpl } = scriptAndGraph(() => {
+      graphHits += 1;
+      const error = new Error('timeout');
+      error.code = 'ETIMEDOUT';
+      throw error;
+    });
+    const response = await handleOneDriveStreamRequest(
+      new Request('http://dashboard.local/api/onedrive-stream?id=FILE!abc'),
+      { env: streamEnv(), requestImpl },
+    );
+    const body = await response.json();
+    assert.equal(response.status, 504);
+    assert.match(body.message, /terlalu lama/);
+    assert.match(body.message, /ETIMEDOUT/);
+    assert.equal(graphHits, 1);
+    assertNoSecrets(JSON.stringify(body));
+  });
+});
+
+describe('transport Microsoft', () => {
+  test('tanpa requestImpl, fetch dicoba dulu lalu IPv4', async () => {
+    const fetches = [];
+    const tlsCalls = [];
+    mock.method(globalThis, 'fetch', async (url, init) => {
+      fetches.push({
+        url: String(url),
+        method: init?.method,
+        redirect: init?.redirect,
+      });
+      const error = new TypeError('fetch failed');
+      error.cause = Object.assign(new Error('connect ECONNRESET 20.1.2.3:443'), { code: 'ECONNRESET' });
+      throw error;
+    });
+    mock.method(dns, 'lookup', (hostname, options, callback) => {
+      assert.equal(options.family, 4);
+      assert.equal(options.all, true);
+      callback(null, [
+        { address: '20.1.2.3', family: 4 },
+        { address: '20.1.2.4', family: 4 },
+      ]);
+    });
+    mock.method(http, 'request', (target, options, callback) => {
+      const req = new EventEmitter();
+      req.setTimeout = () => req;
+      req.write = () => req;
+      req.end = () => {
+        const res = new Readable({ read() {} });
+        res.statusCode = 200;
+        res.headers = { 'content-type': 'application/json' };
+        callback(res);
+        res.push(Buffer.from(JSON.stringify({
+          status: 'success',
+          refreshToken: REFRESH_LAMA,
+        })));
+        res.push(null);
+      };
+      assert.equal(options.family, undefined);
+      assert.equal(new URL(target).protocol, 'http:');
+      return req;
+    });
+    mock.method(https, 'request', (target, options, callback) => {
+      const url = new URL(target);
+      tlsCalls.push({ host: url.hostname, family: options.family, autoSelectFamily: options.autoSelectFamily, servername: options.servername, lookup: options.lookup });
+      const req = new EventEmitter();
+      req.setTimeout = () => req;
+      req.write = () => req;
+      req.end = () => {
+        const token = url.hostname === 'login.microsoftonline.com';
+        const res = new Readable({ read() {} });
+        res.statusCode = 200;
+        res.headers = { 'content-type': 'application/json' };
+        callback(res);
+        res.push(Buffer.from(JSON.stringify(token
+          ? { access_token: ACCESS, refresh_token: REFRESH_BARU, expires_in: 3600 }
+          : { id: 'FILE!abc', '@microsoft.graph.downloadUrl': 'https://public.sn.files.1drv.com/y4m/iklan.mp4' })));
+        res.push(null);
+      };
+      return req;
+    });
+
+    try {
+      const result = await mintOneDriveDownloadUrl({
+        env: env(),
+        requestImpl: undefined,
+        itemId: 'FILE!abc',
+      });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.url, 'https://public.sn.files.1drv.com/y4m/iklan.mp4');
+      assert.equal(fetches.length, 2);
+      assert.equal(fetches.every((item) => item.redirect === 'manual'), true);
+      assert.equal(fetches.some((item) => item.url.includes('login.microsoftonline.com') && item.method === 'POST'), true);
+      assert.equal(fetches.some((item) => item.url.includes('graph.microsoft.com') && item.method === 'GET'), true);
+      assert.equal(tlsCalls.length, 2);
+      assert.equal(tlsCalls.every((item) => item.family === 4 && item.autoSelectFamily === false), true);
+      assert.equal(tlsCalls[0].servername, 'login.microsoftonline.com');
+      assert.equal(tlsCalls[1].servername, 'graph.microsoft.com');
+      const picked = await new Promise((resolve, reject) => {
+        tlsCalls[0].lookup('login.microsoftonline.com', {}, (err, address, family) => {
+          if (err) reject(err);
+          else resolve({ address, family });
+        });
+      });
+      assert.deepEqual(picked, { address: '20.1.2.4', family: 4 });
+      assert.equal(JSON.stringify(result).includes(ACCESS), false);
+      assert.equal(JSON.stringify(result).includes(REFRESH_LAMA), false);
+    } finally {
+      mock.restoreAll();
+    }
   });
 });
 
