@@ -23,8 +23,8 @@ import {
 import { initialSelection, moveSelection, parseWavPcm, renderTrimmedWav, waveformPeaks } from '../server/voice-audio.js';
 import { base64ToBytes, bytesToBase64, decodeMediaFile } from './voiceDecode.js';
 import { readInworldUsage, rememberInworldAudio } from './inworldMeter.js';
-import { listVoiceResults, saveVoiceResult } from './voiceStore.js';
-import { GEMINI_VOICE_LABEL, filterVoices, partitionProfiles, voiceSample } from './voicePicker.js';
+import { deleteVoiceResult, listVoiceResults, saveVoiceResult } from './voiceStore.js';
+import { GEMINI_VOICE_LABEL, filterVoices, geminiGenderLabel, geminiVoiceGender, partitionProfiles, voiceSample } from './voicePicker.js';
 
 const ENGINES = [
   { id: 'gemini', label: 'Gemini' },
@@ -174,6 +174,12 @@ function WaveTrim({ samples, sampleRate, selection, minSeconds, onChange }) {
   );
 }
 
+function GenderBadge({ voice }) {
+  const gender = geminiVoiceGender(voice);
+  const tone = gender === 'unknown' ? 'bg-slate-50 text-slate-400' : 'bg-slate-100 text-slate-700';
+  return <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-extrabold ${tone}`}>{geminiGenderLabel(voice)}</span>;
+}
+
 function playSlice(source, selection) {
   if (!source || !selection) return;
   const ctx = new AudioContext();
@@ -235,7 +241,10 @@ function GeminiVoiceSelect({ voices, value, onChange, playingId, onPlaySample })
           onClick={() => setOpen((current) => !current)}
           className="flex min-h-10 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border border-black/[0.06] bg-white px-2.5 py-2 text-left text-[12.5px] font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
         >
-          <span className={`truncate ${selected ? 'text-slate-900' : 'text-slate-500'}`}>{selected ? selected.name : GEMINI_VOICE_LABEL}</span>
+          <span className={`flex min-w-0 items-center gap-2 ${selected ? 'text-slate-900' : 'text-slate-500'}`}>
+            <span className="truncate">{selected ? selected.name : GEMINI_VOICE_LABEL}</span>
+            {selected && <GenderBadge voice={selected} />}
+          </span>
           <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
         </button>
         {sample && (
@@ -283,7 +292,10 @@ function GeminiVoiceSelect({ voices, value, onChange, playingId, onPlaySample })
                     className={`flex min-h-10 w-full items-center justify-between gap-2 px-3 py-2 text-left text-[12.5px] focus:outline-none focus-visible:bg-emerald-50 ${active ? 'bg-emerald-50 font-extrabold text-emerald-900' : 'font-semibold text-slate-800'}`}
                   >
                     <span className="truncate">{voice.name}</span>
-                    {active && <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <GenderBadge voice={voice} />
+                      {active && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
+                    </span>
                   </button>
                 </li>
               );
@@ -497,9 +509,11 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
   const [working, setWorking] = useState('');
   const [formError, setFormError] = useState('');
   const [pendingDelete, setPendingDelete] = useState(null);
-  const [playingId, setPlayingId] = useState('');
+  const [pendingAudio, setPendingAudio] = useState(null);
+  const [playback, setPlayback] = useState({ id: '', current: 0, duration: 0, playing: false });
   const [usage, setUsage] = useState(() => readInworldUsage());
   const playerRef = useRef(null);
+  const playingId = playback.playing ? playback.id : '';
 
   async function loadEngine(id) {
     const response = await fetch(enginePath(id));
@@ -665,24 +679,112 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
     }
   }
 
-  function togglePlay(item) {
-    if (playerRef.current?.id === item.id) {
-      playerRef.current.audio.pause();
-      URL.revokeObjectURL(playerRef.current.url);
-      playerRef.current = null;
-      setPlayingId('');
-      return;
-    }
-    if (playerRef.current) {
-      playerRef.current.audio.pause();
-      URL.revokeObjectURL(playerRef.current.url);
+  function bindPlayer(audio, id, fallbackDuration) {
+    const publish = () => {
+      const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (Number(fallbackDuration) || 0);
+      setPlayback({
+        id,
+        current: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+        duration,
+        playing: !audio.paused && !audio.ended,
+      });
+    };
+    audio.ontimeupdate = publish;
+    audio.onplay = publish;
+    audio.onpause = publish;
+    audio.onloadedmetadata = publish;
+    audio.onended = () => {
+      const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : (Number(fallbackDuration) || 0);
+      setPlayback({ id, current: duration, duration, playing: false });
+    };
+  }
+
+  function openPlayer(item) {
+    const existing = playerRef.current;
+    if (existing?.id === item.id) return existing;
+    if (existing) {
+      existing.audio.pause();
+      URL.revokeObjectURL(existing.url);
     }
     const url = URL.createObjectURL(new Blob([wavBytes(item.wav)], { type: 'audio/wav' }));
     const audio = new Audio(url);
-    audio.onended = () => setPlayingId('');
-    audio.play().catch(() => setFormError('Audio tidak bisa diputar di browser ini.'));
-    playerRef.current = { id: item.id, audio, url };
-    setPlayingId(item.id);
+    audio.preload = 'auto';
+    const fallback = Number(item.durationSec) || 0;
+    bindPlayer(audio, item.id, fallback);
+    const player = { id: item.id, audio, url, fallback, pendingSeek: null, waitingSeek: false };
+    playerRef.current = player;
+    setPlayback({ id: item.id, current: 0, duration: fallback, playing: false });
+    return player;
+  }
+
+  function togglePlay(item) {
+    const player = openPlayer(item);
+    if (!player.audio.paused && !player.audio.ended) {
+      player.audio.pause();
+      return;
+    }
+    if (player.audio.ended) player.audio.currentTime = 0;
+    player.audio.play().catch(() => setFormError('Audio tidak bisa diputar di browser ini.'));
+  }
+
+  function seekItem(item, seconds) {
+    const player = openPlayer(item);
+    const requested = Number(seconds);
+    const known = Number.isFinite(player.audio.duration) && player.audio.duration > 0 ? player.audio.duration : (player.fallback || 0);
+    const next = Math.min(Math.max(0, Number.isFinite(requested) ? requested : 0), known || 0);
+    player.pendingSeek = next;
+    setPlayback({
+      id: item.id,
+      current: next,
+      duration: known,
+      playing: !player.audio.paused && !player.audio.ended,
+    });
+    const apply = () => {
+      if (playerRef.current !== player || player.pendingSeek == null) return;
+      const target = player.pendingSeek;
+      player.pendingSeek = null;
+      const duration = Number.isFinite(player.audio.duration) && player.audio.duration > 0 ? player.audio.duration : (player.fallback || 0);
+      const clamped = Math.min(Math.max(0, target), duration || 0);
+      if (player.audio.readyState >= 1) {
+        try { player.audio.currentTime = clamped; } catch { /* metadata belum siap */ }
+      }
+      setPlayback({
+        id: item.id,
+        current: clamped,
+        duration,
+        playing: !player.audio.paused && !player.audio.ended,
+      });
+    };
+    if (player.audio.readyState >= 1) apply();
+    else if (!player.waitingSeek) {
+      player.waitingSeek = true;
+      player.audio.addEventListener('loadedmetadata', () => {
+        player.waitingSeek = false;
+        apply();
+      }, { once: true });
+    }
+  }
+
+  function releasePlayer(id) {
+    const current = playerRef.current;
+    if (!current || (id && current.id !== id)) return;
+    current.audio.pause();
+    URL.revokeObjectURL(current.url);
+    playerRef.current = null;
+    setPlayback({ id: '', current: 0, duration: 0, playing: false });
+  }
+
+  async function confirmDeleteAudio() {
+    if (!pendingAudio) return;
+    const target = pendingAudio;
+    setPendingAudio(null);
+    try {
+      await deleteVoiceResult(target.id);
+      releasePlayer(target.id);
+      setResults((current) => current.filter((item) => item.id !== target.id));
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Audio gagal dihapus.');
+    }
   }
 
   function playVoiceSample(voice) {
@@ -806,14 +908,14 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
               <span className="relative block">
                 <select value={voiceId} onChange={(event) => setPicked((current) => ({ ...current, [engine]: event.target.value }))} className="w-full appearance-none rounded-xl border border-black/[0.06] px-2.5 py-2 pr-8 text-[12.5px] font-semibold">
                   {voices.length === 0 && <option value="">Belum ada profil</option>}
-                  {voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name}</option>)}
+                  {voices.map((voice) => <option key={voice.id} value={voice.id}>{engine === 'gemini' && voice.kind === 'prebuilt' ? `${voice.name} · ${geminiGenderLabel(voice)}` : voice.name}</option>)}
                 </select>
                 <ChevronDown className="pointer-events-none absolute top-1/2 right-2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" aria-hidden="true" />
               </span>
             </label>
             <label className="mt-2 block">
               <FieldLabel>Naskah</FieldLabel>
-              <textarea value={script} onChange={(event) => setScript(event.target.value.slice(0, SCRIPT_LIMIT))} rows={4} placeholder="Tulis naskah yang akan dibacakan." className="min-h-[86px] w-full resize-none rounded-xl border border-black/[0.06] px-3 py-2.5 text-[12.5px] font-medium" />
+              <textarea value={script} onChange={(event) => setScript(event.target.value.slice(0, SCRIPT_LIMIT))} rows={10} placeholder="Tulis naskah yang akan dibacakan." className="min-h-48 w-full resize-y rounded-xl border border-black/[0.06] px-3 py-2.5 text-[13px] font-medium leading-relaxed lg:min-h-80" />
             </label>
             <div className="mt-1 flex items-center justify-between gap-2 max-lg:pr-16">
               <button type="button" onClick={helpScript} disabled={working === 'naskah'} className="inline-flex items-center gap-1 text-[11.5px] font-bold text-emerald-800 disabled:opacity-50"><Sparkles className="h-3.5 w-3.5" aria-hidden="true" />{working === 'naskah' ? 'Menulis…' : 'Bantu tulis naskah (Gemini)'}</button>
@@ -852,18 +954,47 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
             <span className="text-[11px] font-bold text-slate-400">{results.length} file</span>
           </div>
           {results.length === 0 && <p className="mt-3 text-[12px] font-medium text-slate-500">Belum ada audio. Hasil tersimpan di browser ini.</p>}
-          {results.map((item) => (
-            <div key={item.id} className="flex items-center gap-2.5 border-t border-black/[0.06] py-2.5">
-              <button type="button" aria-label={`Putar ${item.title}`} onClick={() => togglePlay(item)} className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[11px] bg-slate-900 text-white">
-                {playingId === item.id ? <Pause className="h-3.5 w-3.5" fill="currentColor" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
-              </button>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-[12.5px] font-extrabold">{item.title}</span>
-                <span className="mt-0.5 block text-[10.5px] font-semibold text-slate-500">{shortClock(item.durationSec)} · {formatIdDate(item.createdAt)} · {item.voiceName} · {item.engine || 'gemini'}</span>
-              </span>
-              <button type="button" onClick={() => download(item)} className="inline-flex shrink-0 items-center gap-1 rounded-[10px] border border-black/[0.06] px-2 py-1.5 text-[10.5px] font-extrabold"><Download className="h-3 w-3" aria-hidden="true" /> Unduh WAV</button>
-            </div>
-          ))}
+          {results.map((item) => {
+            const active = playback.id === item.id;
+            const total = active && playback.duration > 0 ? playback.duration : (Number(item.durationSec) || 0);
+            const elapsed = active ? Math.min(Math.max(0, playback.current || 0), total || playback.current || 0) : 0;
+            const playing = active && playback.playing;
+            return (
+              <div key={item.id} className="border-t border-black/[0.06] py-2.5">
+                <div className="flex items-start gap-2.5">
+                  <button type="button" aria-label={playing ? `Jeda ${item.title}` : `Putar ${item.title}`} onClick={() => togglePlay(item)} className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-[11px] bg-slate-900 text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600">
+                    {playing ? <Pause className="h-3.5 w-3.5" fill="currentColor" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] font-extrabold">{item.title}</span>
+                    <span className="mt-0.5 block truncate text-[10.5px] font-semibold text-slate-500">{formatIdDate(item.createdAt)} · {item.voiceName} · {item.engine || 'gemini'}</span>
+                    <div className="mt-2 flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={0}
+                        max={total > 0 ? total : 0}
+                        step={0.1}
+                        value={total > 0 ? Math.min(elapsed, total) : 0}
+                        disabled={total <= 0}
+                        aria-label={`Geser posisi ${item.title}`}
+                        aria-valuemin={0}
+                        aria-valuemax={Math.round(total)}
+                        aria-valuenow={Math.round(elapsed)}
+                        aria-valuetext={`${shortClock(elapsed)} dari ${shortClock(total)}`}
+                        onChange={(event) => seekItem(item, Number(event.target.value))}
+                        className="h-6 min-w-0 flex-1 cursor-pointer accent-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      />
+                      <span className="shrink-0 font-bold tabular-nums text-[10.5px] text-slate-600">{shortClock(elapsed)} / {shortClock(total)}</span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <button type="button" onClick={() => download(item)} className="inline-flex shrink-0 items-center gap-1 rounded-[10px] border border-black/[0.06] px-2 py-1.5 text-[10.5px] font-extrabold"><Download className="h-3 w-3" aria-hidden="true" /> Unduh WAV</button>
+                      <button type="button" aria-label={`Hapus ${item.title}`} onClick={() => setPendingAudio(item)} className="inline-flex shrink-0 items-center gap-1 rounded-[10px] border border-red-200 px-2 py-1.5 text-[10.5px] font-extrabold text-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-700"><Trash2 className="h-3 w-3" aria-hidden="true" /> Hapus</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </section>
       </div>
 
@@ -875,6 +1006,19 @@ export default function EditorVoicePanel({ rawAssets = [], onChromeChange, backR
             <div className="mt-3 flex justify-end gap-2">
               <button type="button" onClick={() => setPendingDelete(null)} className="rounded-xl border border-black/[0.06] px-3 py-2 text-[12px] font-extrabold">Batal</button>
               <button type="button" onClick={confirmDelete} className="rounded-xl bg-red-700 px-3 py-2 text-[12px] font-extrabold text-white">Hapus</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingAudio && (
+        <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+          <div role="dialog" aria-modal="true" aria-labelledby="hapus-audio-judul" className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-xl">
+            <h3 id="hapus-audio-judul" className="text-base font-extrabold">Hapus audio ini?</h3>
+            <p className="mt-1 text-[13px] font-medium text-slate-600">Audio “{pendingAudio.title}” dihapus dari browser ini. Tindakan ini tidak bisa dibatalkan.</p>
+            <div className="mt-3 flex justify-end gap-2">
+              <button type="button" onClick={() => setPendingAudio(null)} className="rounded-xl border border-black/[0.06] px-3 py-2 text-[12px] font-extrabold">Batal</button>
+              <button type="button" onClick={confirmDeleteAudio} className="rounded-xl bg-red-700 px-3 py-2 text-[12px] font-extrabold text-white">Hapus</button>
             </div>
           </div>
         </div>
