@@ -40,6 +40,7 @@ describe('isian screenshot pelanggaran', () => {
       produk: '',
       jenis: 'klaim berlebihan',
       tanggal: '2026-11-20',
+      penyebab: 'Klaim sembuh total https://vt.tiktok.com/abc',
       catatan: 'Klaim sembuh total https://vt.tiktok.com/abc',
       status: 'Ditolak',
       linkVideo: 'https://www.tiktok.com/jangan-diisi',
@@ -50,10 +51,11 @@ describe('isian screenshot pelanggaran', () => {
     assert.equal(applied.form.jenis, 'Klaim Berlebihan / Misleading');
     assert.equal(applied.customJenis, false);
     assert.equal(applied.form.tanggal, '2026-11-20');
+    assert.equal(applied.form.penyebab, 'Klaim sembuh total');
     assert.equal(applied.form.catatan, 'Klaim sembuh total');
     assert.equal(applied.form.status, 'Belum Banding');
     assert.equal(applied.form.linkVideo, 'https://www.tiktok.com/sudah-diisi');
-    assert.deepEqual(applied.labels, ['akun', 'jenis pelanggaran', 'tanggal', 'catatan']);
+    assert.deepEqual(applied.labels, ['akun', 'jenis pelanggaran', 'tanggal', 'penyebab', 'catatan']);
     assert.equal(applied.filled.status, undefined);
     assert.equal(applied.filled.produk, undefined);
   });

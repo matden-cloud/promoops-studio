@@ -1,7 +1,7 @@
 import { handleGeminiRequest } from '../server/gemini.js';
 
 export const config = {
-  maxDuration: 30,
+  maxDuration: 60,
 };
 
 export default {

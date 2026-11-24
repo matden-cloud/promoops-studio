@@ -42,6 +42,7 @@ describe('Gemini membaca screenshot pelanggaran', () => {
           produk: 'Pisau',
           jenis: 'Klaim Berlebihan / Misleading',
           tanggal: '20 November 2026',
+          penyebab: `produk tajam ${API_KEY} https://www.tiktok.com/@toko/video/1`,
           catatan: `klaim medis ${API_KEY} https://www.tiktok.com/@toko/video/1`,
           status: 'ditolak',
           linkVideo: 'https://www.tiktok.com/@toko/video/1',
@@ -58,6 +59,8 @@ describe('Gemini membaca screenshot pelanggaran', () => {
     assert.equal(sent.generationConfig.responseMimeType, 'application/json');
     assert.equal(sent.generationConfig.responseSchema.type, 'OBJECT');
     assert.equal(sent.generationConfig.responseSchema.properties.linkVideo, undefined);
+    assert.equal(typeof sent.generationConfig.responseSchema.properties.penyebab, 'object');
+    assert.equal(sent.contents[0].parts[1].text.includes('penyebab:'), true);
     assert.equal(sent.generationConfig.thinkingConfig.thinkingLevel, 'MINIMAL');
     const body = await response.json();
     assert.deepEqual(body.fields, {
@@ -65,6 +68,7 @@ describe('Gemini membaca screenshot pelanggaran', () => {
       produk: 'Pisau',
       jenis: 'Klaim Berlebihan / Misleading',
       tanggal: '2026-11-20',
+      penyebab: 'produk tajam [redacted]',
       catatan: `klaim medis [redacted]`,
       status: '',
     });
@@ -141,6 +145,8 @@ describe('Gemini membaca screenshot pelanggaran', () => {
     assert.equal(parseViolationNotice('```json\n{"tanggal":"20/11/2026","status":"Banding Diterima","jenis":"Audio"}\n```').tanggal, '2026-11-20');
     assert.equal(parseViolationNotice('{"tanggal":"2026-02-31","status":"Banding Diterima"}').tanggal, '');
     assert.equal(parseViolationNotice('{"status":"Banding Diterima"}').status, 'Banding Diterima');
+    assert.equal(parseViolationNotice('{"penyebab":"produk tajam"}').penyebab, 'produk tajam');
+    assert.equal(parseViolationNotice('{"jenis":"Audio"}').penyebab, '');
     assert.equal(parseViolationNotice('{"status":"ditolak"}').status, '');
     assert.equal(parseViolationNotice('bukan'), null);
   });
