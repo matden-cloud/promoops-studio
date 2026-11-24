@@ -15,7 +15,7 @@ describe('merek Video', () => {
     assert.match(html, /<title>Video<\/title>/);
     const link = html.match(/rel="manifest"\s+href="([^"]+)"/);
     if (!link) return;
-    const manifest = JSON.parse(readFileSync(new URL(`..${link[1].startsWith('/') ? '' : '/'}${link[1]}`, import.meta.url), 'utf8'));
+    const manifest = JSON.parse(readFileSync(new URL(`../public${link[1].startsWith('/') ? '' : '/'}${link[1]}`, import.meta.url), 'utf8'));
     assert.equal(manifest.name, 'Video');
     assert.equal(manifest.short_name, 'Video');
   });

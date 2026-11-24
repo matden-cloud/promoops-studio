@@ -1,0 +1,11 @@
+export const PWA_NAME = 'Video';
+export const PWA_SHORT_NAME = 'Video';
+export const PWA_DESCRIPTION = 'OneDrive, produksi, dan publisher.';
+export const PWA_START_URL = '/';
+export const PWA_SCOPE = '/';
+export const PWA_DISPLAY = 'standalone';
+export const PWA_LANG = 'id';
+export const THEME_COLOR = '#f3f5f4';
+export const BACKGROUND_COLOR = '#f3f5f4';
+export const ICON_COLOR = '#047857';
+export const ICON_RGB = Object.freeze([4, 120, 87, 255]);

@@ -1,8 +1,9 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { videoPwaPlugin } from './server/pwa-plugin.js'
 import { promoOpsApiPlugin } from './server/vite-api-plugin.js'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), promoOpsApiPlugin()],
+  plugins: [react(), promoOpsApiPlugin(), videoPwaPlugin()],
 })
