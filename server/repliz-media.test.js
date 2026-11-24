@@ -100,4 +100,22 @@ describe('URL media bertanda tangan', () => {
     assert.equal(response.status, 403);
     assert.equal(mints, 0);
   });
+
+  test('kegagalan OneDrive meneruskan kode kesalahan', async () => {
+    const now = Date.parse('2026-11-20T00:00:00.000Z');
+    const exp = Math.floor((now + (3 * 60 * 60 * 1000)) / 1000);
+    const response = await handleReplizMediaRequest(signedRequest(exp), {
+      env: { MEDIA_URL_SECRET: SECRET },
+      now,
+      mintImpl: async () => ({
+        ok: false,
+        status: 502,
+        message: 'Gagal menghubungi Microsoft. (ECONNRESET: connect ECONNRESET)',
+      }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 502);
+    assert.equal(body.error, 'onedrive_error');
+    assert.match(body.message, /ECONNRESET/);
+  });
 });

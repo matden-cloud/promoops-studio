@@ -1,3 +1,4 @@
+import dns from 'node:dns';
 import http from 'node:http';
 import https from 'node:https';
 import { fetchAppsScript } from './apps-script.js';
@@ -14,6 +15,7 @@ import {
   isAllowedItemContentUrl,
   isAllowedPlaybackUrl,
   isItemId,
+  isMicrosoftApiHost,
   itemContentGraphUrl,
   itemMetaGraphUrl,
   normalizeStats,
@@ -123,32 +125,244 @@ function scrubValue(value, secrets) {
   return value;
 }
 
-function defaultRequest(url, { method = 'GET', headers, body } = {}) {
+const RETRYABLE_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ECONNABORTED',
+  'EPROTO',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EAI_NODATA',
+  'EAI_FAIL',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_SOCKET',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_CLOSED',
+]);
+
+function isTimeoutError(err) {
+  if (!err) return false;
+  if (err.message === 'timeout' || err.name === 'TimeoutError') return true;
+  if (err.cause && (err.cause.message === 'timeout' || err.cause.name === 'TimeoutError')) return true;
+  return false;
+}
+
+function collectErrors(err, into = []) {
+  if (!err || into.length > 8 || into.includes(err)) return into;
+  into.push(err);
+  if (err.cause) collectErrors(err.cause, into);
+  if (Array.isArray(err.errors)) {
+    for (const item of err.errors) collectErrors(item, into);
+  }
+  return into;
+}
+
+function transportCode(err) {
+  if (isTimeoutError(err)) return 'ETIMEDOUT';
+  for (const item of collectErrors(err)) {
+    if (typeof item.code === 'string' && item.code && item.code !== 'ABORT_ERR') return item.code;
+  }
+  if (err?.name && err.name !== 'Error' && err.name !== 'TypeError') return err.name;
+  return 'NETWORK';
+}
+
+function isTlsCode(code) {
+  return /^(CERT_|ERR_SSL_|ERR_TLS_|ERR_OSSL_|UNABLE_TO_|DEPTH_ZERO|SELF_SIGNED)/.test(code);
+}
+
+function isRetryableTransportError(err) {
+  if (!err || isTimeoutError(err)) return false;
+  const code = transportCode(err);
+  return RETRYABLE_CODES.has(code) || isTlsCode(code);
+}
+
+function deepestMessage(err) {
+  let message = '';
+  for (const item of collectErrors(err)) {
+    if (typeof item.message === 'string' && item.message.trim()) message = item.message.trim();
+  }
+  return message;
+}
+
+function scrubTransportText(text, secrets) {
+  let out = scrubString(text, secrets);
+  out = out.replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]');
+  out = out.replace(/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, '[redacted]');
+  out = out.replace(/([?&](?:sig|code|token|access_token|refresh_token|device_code|client_secret)=)[^&\s]+/gi, '$1[redacted]');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+function transportDetail(err, secrets) {
+  const code = scrubTransportText(transportCode(err), secrets).replace(/[^A-Za-z0-9_]/g, '').slice(0, 48) || 'NETWORK';
+  const detail = scrubTransportText(deepestMessage(err), secrets).slice(0, 160);
+  return { code, detail };
+}
+
+function transportHttpError(err, secrets, status, fallback) {
+  const { code, detail } = transportDetail(err, secrets);
+  const shown = detail && detail !== code ? `${code}: ${detail}` : code;
+  return new HttpError(status, `${fallback} (${shown})`);
+}
+
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function microsoftTarget(url) {
+  const host = hostnameOf(url);
+  return host ? isMicrosoftApiHost(host) : false;
+}
+
+function logTransportFailure(url, err, secrets, attempt) {
+  const host = hostnameOf(url) || 'microsoft';
+  const { code, detail } = transportDetail(err, secrets);
+  console.error(`[onedrive] ${host} percobaan ${attempt + 1}/3 ${code}: ${detail || code}`);
+}
+
+function readNodeResponse(res, resolve) {
+  const chunks = [];
+  res.on('data', (chunk) => chunks.push(chunk));
+  res.on('end', () => {
+    resolve({
+      status: res.statusCode || 0,
+      headers: res.headers,
+      body: Buffer.concat(chunks),
+    });
+  });
+}
+
+function timeoutError() {
+  const error = new Error('timeout');
+  error.code = 'ETIMEDOUT';
+  return error;
+}
+
+function nodeHttpRequest(url, { method = 'GET', headers, body } = {}, extra = {}) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const lib = target.protocol === 'https:' ? https : http;
-    const options = { method };
+    const options = { method, ...extra };
     if (headers) options.headers = headers;
 
-    const req = lib.request(target, options, (res) => {
-      const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => {
-        resolve({
-          status: res.statusCode || 0,
-          headers: res.headers,
-          body: Buffer.concat(chunks),
-        });
-      });
-    });
-
+    const req = lib.request(target, options, (res) => readNodeResponse(res, resolve));
     req.setTimeout(GRAPH_TIMEOUT_MS, () => {
-      req.destroy(new Error('timeout'));
+      req.destroy(timeoutError());
     });
     req.on('error', reject);
     if (body != null && method !== 'GET' && method !== 'HEAD') req.write(body);
     req.end();
   });
+}
+
+function headerObject(headers) {
+  const out = {};
+  headers.forEach((value, key) => {
+    const name = key.toLowerCase();
+    if (out[name] == null) {
+      out[name] = value;
+      return;
+    }
+    out[name] = Array.isArray(out[name]) ? [...out[name], value] : [out[name], value];
+  });
+  return out;
+}
+
+async function fetchNodeResponse(url, { method = 'GET', headers, body } = {}, fetchImpl = fetch) {
+  const init = {
+    method,
+    headers,
+    redirect: 'manual',
+    signal: AbortSignal.timeout(GRAPH_TIMEOUT_MS),
+  };
+  if (body != null && method !== 'GET' && method !== 'HEAD') init.body = body;
+  let response;
+  try {
+    response = await fetchImpl(url, init);
+  } catch (err) {
+    if (isTimeoutError(err)) throw timeoutError();
+    throw err;
+  }
+  return {
+    status: response.status || 0,
+    headers: headerObject(response.headers),
+    body: Buffer.from(await response.arrayBuffer()),
+  };
+}
+
+function ipv4Lookup(attempt, lookupImpl = dns.lookup) {
+  return (hostname, options, callback) => {
+    const done = typeof options === 'function' ? options : callback;
+    lookupImpl(hostname, { family: 4, all: true }, (err, addresses) => {
+      if (err) {
+        done(err);
+        return;
+      }
+      const list = Array.isArray(addresses) ? addresses : [];
+      if (list.length === 0) {
+        const error = new Error(`Tidak ada alamat IPv4 untuk ${hostname}`);
+        error.code = 'ENOTFOUND';
+        done(error);
+        return;
+      }
+      const start = attempt % list.length;
+      const ordered = list.slice(start).concat(list.slice(0, start));
+      if (options && options.all) {
+        done(null, ordered.map((item) => ({ address: item.address, family: 4 })));
+        return;
+      }
+      done(null, ordered[0].address, 4);
+    });
+  };
+}
+
+function ipv4NodeResponse(url, options, attempt, lookupImpl) {
+  const hostname = new URL(url).hostname;
+  return nodeHttpRequest(url, options, {
+    family: 4,
+    autoSelectFamily: false,
+    servername: hostname,
+    lookup: ipv4Lookup(attempt, lookupImpl),
+  });
+}
+
+// Percobaan pertama ke Microsoft memakai fetch (undici), bukan https.request.
+// undici tidak memakai autoSelectFamily, yang di Node 22/26 mudah putus pada
+// host dengan banyak alamat IPv6 seperti login.microsoftonline.com. Percobaan
+// berikutnya memaksa IPv4. Redirect tidak diikuti: Graph /content membalas 302.
+async function defaultRequest(url, options = {}) {
+  if (!microsoftTarget(url)) return nodeHttpRequest(url, options);
+  const attempt = Number(options.microsoftAttempt) || 0;
+  if (attempt === 0) return fetchNodeResponse(url, options);
+  return ipv4NodeResponse(url, options, attempt);
+}
+
+function withTransportRetry(requestImpl, secrets) {
+  return async function retried(url, options = {}) {
+    const microsoft = microsoftTarget(url);
+    const retries = microsoft ? 2 : 0;
+    let lastError;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      try {
+        return await requestImpl(url, { ...options, microsoftAttempt: attempt });
+      } catch (err) {
+        lastError = err;
+        if (microsoft) logTransportFailure(url, err, secrets, attempt);
+        if (!microsoft || !isRetryableTransportError(err) || attempt === retries) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+      }
+    }
+    throw lastError;
+  };
 }
 
 function chunk(list, size) {
@@ -236,7 +450,7 @@ function microsoftFailureMessage(parsed, fallback) {
   return code ? `${fallback} (${code})` : fallback;
 }
 
-async function microsoftToken(requestImpl, body) {
+async function microsoftToken(requestImpl, body, secrets) {
   let response;
   try {
     response = await requestImpl(ONEDRIVE_TOKEN_URL, {
@@ -244,8 +458,8 @@ async function microsoftToken(requestImpl, body) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
     });
-  } catch {
-    throw new HttpError(502, 'Gagal menghubungi Microsoft.');
+  } catch (err) {
+    throw transportHttpError(err, secrets, 502, 'Gagal menghubungi Microsoft.');
   }
   const parsed = parseJsonSafe(asText(response.body));
   return { status: response.status || 0, parsed };
@@ -265,7 +479,7 @@ async function readJsonBody(request) {
   }
 }
 
-async function graphCall(requestImpl, url, accessToken, options = {}) {
+async function graphCall(requestImpl, url, accessToken, options = {}, secrets = []) {
   const method = options.method || 'GET';
   const allowed = method === 'POST' ? isAllowedCreateLink(url) : isAllowedGraphRead(url);
   if (!allowed) throw new HttpError(502, 'Permintaan OneDrive ditolak.');
@@ -281,10 +495,10 @@ async function graphCall(requestImpl, url, accessToken, options = {}) {
       body: options.body,
     });
   } catch (err) {
-    if (err && err.message === 'timeout') {
-      throw new HttpError(504, 'OneDrive terlalu lama membalas. Jalankan sinkron lagi; file yang sudah tersimpan tidak diulang.');
+    if (isTimeoutError(err)) {
+      throw transportHttpError(err, secrets, 504, 'OneDrive terlalu lama membalas. Jalankan sinkron lagi; file yang sudah tersimpan tidak diulang.');
     }
-    throw new HttpError(502, 'Gagal menghubungi OneDrive.');
+    throw transportHttpError(err, secrets, 502, 'Gagal menghubungi OneDrive.');
   }
   return {
     status: response.status || 0,
@@ -304,7 +518,7 @@ async function refreshAccessToken({ env, requestImpl, refreshToken, secrets }) {
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
     scope: ONEDRIVE_SCOPE,
-  }));
+  }), secrets);
   remember(secrets, parsed.access_token);
   remember(secrets, parsed.refresh_token);
 
@@ -321,13 +535,13 @@ async function refreshAccessToken({ env, requestImpl, refreshToken, secrets }) {
   return { accessToken: parsed.access_token, refreshToken: nextRefresh };
 }
 
-async function graphCallWithRefresh(requestImpl, url, auth, options, refresh) {
-  let result = await graphCall(requestImpl, url, auth.accessToken, options);
+async function graphCallWithRefresh(requestImpl, url, auth, options, refresh, secrets = []) {
+  let result = await graphCall(requestImpl, url, auth.accessToken, options, secrets);
   if (result.status !== 401) return result;
   const next = await refresh();
   auth.accessToken = next.accessToken;
   auth.refreshToken = next.refreshToken;
-  result = await graphCall(requestImpl, url, auth.accessToken, options);
+  result = await graphCall(requestImpl, url, auth.accessToken, options, secrets);
   if (result.status === 401) {
     throw needsLoginError('Sesi OneDrive berakhir. Hubungkan ulang dari dashboard.');
   }
@@ -377,7 +591,7 @@ async function runSyncBatch({ env, requestImpl, target, cursor, stats, now, budg
   let state = cursor;
   if (!state) {
     const rootUrl = rootGraphUrl(target.path);
-    const root = await graphCallWithRefresh(requestImpl, rootUrl, auth, {}, refresh);
+    const root = await graphCallWithRefresh(requestImpl, rootUrl, auth, {}, refresh, secrets);
     if (root.status === 404) {
       throw new HttpError(404, `Folder OneDrive tidak ditemukan: ${target.path}`);
     }
@@ -425,7 +639,7 @@ async function runSyncBatch({ env, requestImpl, target, cursor, stats, now, budg
     }
 
     if (!page || page.url !== state.pageUrl) {
-      const listed = await graphCallWithRefresh(requestImpl, state.pageUrl, auth, {}, refresh);
+      const listed = await graphCallWithRefresh(requestImpl, state.pageUrl, auth, {}, refresh, secrets);
       if (listed.status === 403) throw new HttpError(403, 'Tidak ada izin membaca folder OneDrive itu.');
       if (listed.status === 404) throw new HttpError(404, 'Sebagian folder OneDrive tidak ditemukan.');
       if (listed.status !== 200 || !Array.isArray(listed.parsed.value)) {
@@ -491,7 +705,7 @@ async function runSyncBatch({ env, requestImpl, target, cursor, stats, now, budg
       const linked = await graphCallWithRefresh(requestImpl, linkUrl, auth, {
         method: 'POST',
         body: JSON.stringify({ type: 'view' }),
-      }, refresh);
+      }, refresh, secrets);
       if (linked.status === 401) {
         throw needsLoginError('Sesi OneDrive berakhir. Hubungkan ulang dari dashboard.');
       }
@@ -563,8 +777,8 @@ async function startLogin({ env, requestImpl, now, secrets }) {
         scope: ONEDRIVE_SCOPE,
       }).toString(),
     });
-  } catch {
-    throw new HttpError(502, 'Gagal menghubungi Microsoft.');
+  } catch (err) {
+    throw transportHttpError(err, secrets, 502, 'Gagal menghubungi Microsoft.');
   }
 
   const parsed = parseJsonSafe(asText(response.body));
@@ -614,7 +828,7 @@ async function pollLogin({ env, requestImpl, now, secrets }) {
     client_id: clientId,
     grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
     device_code: deviceCode,
-  }));
+  }), secrets);
   remember(secrets, parsed.access_token);
   remember(secrets, parsed.refresh_token);
 
@@ -717,7 +931,7 @@ function locationOf(response) {
   return headers.location || headers.Location || '';
 }
 
-async function graphContentLocation(requestImpl, url, accessToken) {
+async function graphContentLocation(requestImpl, url, accessToken, secrets = []) {
   if (!isAllowedItemContentUrl(url)) throw new HttpError(502, 'Permintaan OneDrive ditolak.');
   let response;
   try {
@@ -726,10 +940,10 @@ async function graphContentLocation(requestImpl, url, accessToken) {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
   } catch (err) {
-    if (err && err.message === 'timeout') {
-      throw new HttpError(504, 'OneDrive terlalu lama membalas.');
+    if (isTimeoutError(err)) {
+      throw transportHttpError(err, secrets, 504, 'OneDrive terlalu lama membalas.');
     }
-    throw new HttpError(502, 'Gagal menghubungi OneDrive.');
+    throw transportHttpError(err, secrets, 502, 'Gagal menghubungi OneDrive.');
   }
   return {
     status: response.status || 0,
@@ -738,19 +952,19 @@ async function graphContentLocation(requestImpl, url, accessToken) {
 }
 
 async function resolvePlaybackUrl({ requestImpl, itemId, auth, refresh, secrets }) {
-  const meta = await graphCallWithRefresh(requestImpl, itemMetaGraphUrl(itemId), auth, {}, refresh);
+  const meta = await graphCallWithRefresh(requestImpl, itemMetaGraphUrl(itemId), auth, {}, refresh, secrets);
   if (meta.status === 404) throw new HttpError(404, 'File OneDrive tidak ditemukan.');
   if (meta.status === 403) throw new HttpError(403, 'Tidak ada izin membaca file OneDrive itu.');
   if (meta.status !== 200) throw new HttpError(502, 'Gagal membaca file OneDrive.');
   const fromMeta = playbackUrlOrNull(meta.parsed?.['@microsoft.graph.downloadUrl'], secrets);
   if (fromMeta) return fromMeta;
 
-  let content = await graphContentLocation(requestImpl, itemContentGraphUrl(itemId), auth.accessToken);
+  let content = await graphContentLocation(requestImpl, itemContentGraphUrl(itemId), auth.accessToken, secrets);
   if (content.status === 401) {
     const next = await refresh();
     auth.accessToken = next.accessToken;
     auth.refreshToken = next.refreshToken;
-    content = await graphContentLocation(requestImpl, itemContentGraphUrl(itemId), auth.accessToken);
+    content = await graphContentLocation(requestImpl, itemContentGraphUrl(itemId), auth.accessToken, secrets);
   }
   if (content.status === 401) {
     throw needsLoginError('Sesi OneDrive berakhir. Hubungkan ulang dari dashboard.');
@@ -779,10 +993,11 @@ async function loadPlaybackUrl({ env, requestImpl, itemId, secrets }) {
   return resolvePlaybackUrl({ requestImpl, itemId: id, auth, refresh, secrets });
 }
 
-export async function mintOneDriveDownloadUrl({ env, requestImpl, itemId }) {
+export async function mintOneDriveDownloadUrl({ env, requestImpl = defaultRequest, itemId } = {}) {
   const secrets = [];
+  const outbound = withTransportRetry(requestImpl, secrets);
   try {
-    const url = await loadPlaybackUrl({ env, requestImpl, itemId, secrets });
+    const url = await loadPlaybackUrl({ env, requestImpl: outbound, itemId, secrets });
     return { ok: true, url };
   } catch (err) {
     const status = err instanceof HttpError ? err.status : 502;
@@ -798,9 +1013,9 @@ export async function mintOneDriveDownloadUrl({ env, requestImpl, itemId }) {
 
 export async function handleOneDriveStreamRequest(request, deps = {}) {
   const env = deps.env || process.env;
-  const requestImpl = deps.requestImpl || defaultRequest;
   const fetchImpl = deps.fetchImpl || fetch;
   const secrets = [];
+  const requestImpl = withTransportRetry(deps.requestImpl || defaultRequest, secrets);
 
   try {
     const method = request.method.toUpperCase();
@@ -825,9 +1040,9 @@ export async function handleOneDriveStreamRequest(request, deps = {}) {
 
 export async function handleOneDriveLoginRequest(request, deps = {}) {
   const env = deps.env || process.env;
-  const requestImpl = deps.requestImpl || defaultRequest;
   const now = deps.now || Date.now;
   const secrets = [];
+  const requestImpl = withTransportRetry(deps.requestImpl || defaultRequest, secrets);
 
   try {
     const method = request.method.toUpperCase();
@@ -855,11 +1070,11 @@ export async function handleOneDriveLoginRequest(request, deps = {}) {
 
 export async function handleOneDriveSyncRequest(request, deps = {}) {
   const env = deps.env || process.env;
-  const requestImpl = deps.requestImpl || defaultRequest;
   const now = deps.now || Date.now;
   const budgetMs = Number.isFinite(deps.budgetMs) ? deps.budgetMs : SYNC_BUDGET_MS;
   const maxItems = Number.isFinite(deps.maxItems) ? deps.maxItems : SYNC_MAX_ITEMS;
   const secrets = [];
+  const requestImpl = withTransportRetry(deps.requestImpl || defaultRequest, secrets);
 
   try {
     const method = request.method.toUpperCase();
