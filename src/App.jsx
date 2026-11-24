@@ -19,6 +19,7 @@ import JadwalReplizPanel from './JadwalReplizPanel.jsx';
 import EditorVoicePanel from './EditorVoicePanel.jsx';
 import ViolationNoticeReader from './ViolationNoticeReader.jsx';
 import ViolationJenisPills from './ViolationJenisPills.jsx';
+import ViolationClampText from './ViolationClampText.jsx';
 import ViolationVideoAnalysis from './ViolationVideoAnalysis.jsx';
 import {
   NOTICE_FIELD_LABELS,
@@ -3609,11 +3610,7 @@ export default function App() {
                           <ViolationJenisPills jenis={v.jenis} />
                         </td>
                         <td className="px-3 py-3 align-top">
-                          {penyebab ? (
-                            <p className="line-clamp-4 text-xs font-medium leading-relaxed text-gray-700 break-words" title={penyebab}>{penyebab}</p>
-                          ) : (
-                            <span className="text-xs italic text-gray-400">Belum diisi</span>
-                          )}
+                          <ViolationClampText text={penyebab} className="text-gray-700" />
                         </td>
                         <td className="px-3 py-3 align-top">
                           <div className="flex flex-wrap items-center gap-1.5">
@@ -3647,7 +3644,9 @@ export default function App() {
                             <option value="Banding Ditolak">Banding Ditolak</option>
                           </select>
                         </td>
-                        <td className="px-3 py-3 align-top text-xs leading-relaxed text-gray-600 break-words">{v.catatan}</td>
+                        <td className="px-3 py-3 align-top">
+                          <ViolationClampText text={v.catatan} empty="-" className="text-gray-600" />
+                        </td>
                         <td className="px-2 py-3 align-top print:hidden">
                           <button
                             type="button"

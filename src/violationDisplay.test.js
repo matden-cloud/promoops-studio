@@ -5,6 +5,7 @@ import {
   violationDateToIso,
   violationJenisPills,
   violationPenyebab,
+  violationTextCanExpand,
 } from './violationDisplay.js';
 
 describe('tampilan tanggal dan jenis pelanggaran', () => {
@@ -37,6 +38,15 @@ describe('tampilan tanggal dan jenis pelanggaran', () => {
     );
     assert.deepEqual(violationJenisPills(['Audio / Musik Hak Cipta', 'Audio / Musik Hak Cipta']), ['Audio / Musik Hak Cipta']);
     assert.deepEqual(violationJenisPills(''), []);
+  });
+
+  test('teks panjang boleh dibuka, teks pendek tidak', () => {
+    assert.equal(violationTextCanExpand(''), false);
+    assert.equal(violationTextCanExpand('-'), false);
+    assert.equal(violationTextCanExpand('Klaim medis singkat'), false);
+    const long = 'Pelanggaran Promosi Produk yang Tidak Konsisten. Video Anda menampilkan klaim produk yang tidak sesuai dengan barang yang dijual.';
+    assert.equal(long.length > 90, true);
+    assert.equal(violationTextCanExpand(long), true);
   });
 
   test('penyebab kosong bila kolom belum ada', () => {

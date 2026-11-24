@@ -72,6 +72,12 @@ export function violationJenisPills(jenis) {
   return unique;
 }
 
+export function violationTextCanExpand(text) {
+  const value = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!value || value === '-' || value.toLowerCase() === 'null') return false;
+  return value.length > 90;
+}
+
 export function violationPenyebab(record) {
   const source = record && typeof record === 'object' ? record : {};
   const raw = source.penyebab ?? source.Penyebab ?? source.cause ?? '';
