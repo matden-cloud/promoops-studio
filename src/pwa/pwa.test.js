@@ -23,8 +23,11 @@ import { PWA_ICONS, pointInPolygon, renderFaviconSvg, renderIconImage, renderIco
 import {
   isIosDevice,
   isStandaloneDisplay,
+  installPresentation,
+  isDesktopInstallViewport,
   resolveInstallSurface,
   shouldOfferUpdate,
+  updatePresentation,
 } from './installState.js';
 import {
   attachUpdateWatcher,
@@ -287,6 +290,7 @@ describe('prompt pemasangan', () => {
 
   test('android memakai tombol, iphone memakai petunjuk, tutup menyembunyikan', () => {
     assert.equal(resolveInstallSurface({ hasPrompt: true }), 'android');
+    assert.equal(resolveInstallSurface({ hasPrompt: true, dismissed: true }), 'hidden');
     assert.equal(isIosDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 Version/17.5 Mobile/15E148 Safari/604.1'), true);
     assert.equal(isIosDevice('Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/128.0.0.0 Mobile Safari/537.36'), false);
     assert.equal(resolveInstallSurface({ ios: true }), 'ios');
@@ -294,7 +298,18 @@ describe('prompt pemasangan', () => {
     assert.equal(resolveInstallSurface({ preview: 'android', standalone: true }), 'android');
     assert.equal(resolveInstallSurface({ preview: 'ios' }), 'ios');
     assert.equal(resolveInstallSurface({ preview: 'ios', dismissed: true }), 'hidden');
-    assert.equal(resolveInstallSurface({ preview: 'ios', dismissed: true, hasPrompt: true }), 'android');
+    assert.equal(resolveInstallSurface({ preview: 'ios', dismissed: true, hasPrompt: true }), 'hidden');
+    assert.equal(isDesktopInstallViewport({ width: 1280, finePointer: false }), true);
+    assert.equal(isDesktopInstallViewport({ width: 390, finePointer: false }), false);
+    assert.equal(isDesktopInstallViewport({ width: 390, finePointer: true }), true);
+    assert.equal(installPresentation({ surface: 'android', wide: true }), 'header');
+    assert.equal(installPresentation({ surface: 'android', wide: false }), 'bar');
+    assert.equal(installPresentation({ surface: 'ios', wide: false }), 'bar');
+    assert.equal(installPresentation({ surface: 'ios', wide: true }), 'bar');
+    assert.equal(installPresentation({ surface: 'hidden', wide: true }), 'hidden');
+    assert.equal(updatePresentation({ update: true, wide: true }), 'chip');
+    assert.equal(updatePresentation({ update: true, wide: false }), 'bar');
+    assert.equal(updatePresentation({ update: false, wide: true }), 'hidden');
     assert.equal(shouldOfferUpdate({ preview: 'pembaruan' }), true);
     assert.equal(shouldOfferUpdate({ updateReady: true }), true);
     assert.equal(shouldOfferUpdate({}), false);

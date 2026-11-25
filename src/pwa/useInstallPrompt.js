@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   IOS_HINT_STORAGE_KEY,
+  isDesktopInstallViewport,
   isIosDevice,
   isStandaloneDisplay,
   resolveInstallSurface,
@@ -33,6 +34,11 @@ function readDismissed() {
   }
 }
 
+function readWide() {
+  const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  return isDesktopInstallViewport({ width: window.innerWidth, finePointer });
+}
+
 function readStandalone() {
   const fullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
   const standalone = window.matchMedia('(display-mode: standalone)').matches;
@@ -49,10 +55,13 @@ export function useInstallPrompt() {
   const [standalone, setStandalone] = useState(readStandalone);
   const [dismissed, setDismissed] = useState(readDismissed);
   const [ios] = useState(readIos);
+  const [wide, setWide] = useState(readWide);
   const [updateReady, setUpdateReady] = useState(false);
 
   useEffect(() => {
     const media = window.matchMedia('(display-mode: standalone), (display-mode: fullscreen)');
+    const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const onViewport = () => setWide(readWide());
     const onDisplay = () => setStandalone(readStandalone());
     const onPrompt = (event) => {
       event.preventDefault();
@@ -69,15 +78,20 @@ export function useInstallPrompt() {
     window.addEventListener('appinstalled', onInstalled);
     window.addEventListener(UPDATE_EVENT, onUpdate);
     media.addEventListener?.('change', onDisplay);
+    finePointer.addEventListener?.('change', onViewport);
+    window.addEventListener('resize', onViewport);
     return () => {
       window.removeEventListener('beforeinstallprompt', onPrompt);
       window.removeEventListener('appinstalled', onInstalled);
       window.removeEventListener(UPDATE_EVENT, onUpdate);
+      window.removeEventListener('resize', onViewport);
       media.removeEventListener?.('change', onDisplay);
+      finePointer.removeEventListener?.('change', onViewport);
     };
   }, []);
 
   return {
+    wide,
     surface: resolveInstallSurface({ standalone, ios, dismissed, hasPrompt, preview }),
     update: shouldOfferUpdate({ updateReady, preview }),
     async install() {
