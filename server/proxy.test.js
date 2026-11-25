@@ -52,6 +52,8 @@ async function startUpstream(onRequest) {
       params: Object.fromEntries(url.searchParams.entries()),
       body,
       contentType: req.headers['content-type'] || '',
+      contentLength: req.headers['content-length'] || '',
+      transferEncoding: req.headers['transfer-encoding'] || '',
     };
     requests.push(recorded);
     onRequest(req, res, recorded, url);
@@ -196,7 +198,7 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
             action,
             token: 'token-palsu',
             extra: 'jangan-terusan',
-            data: { id: action, catatan: 'aman' },
+            data: { id: action, catatan: 'aman', penyebab: 'pisau — tajam', sanksi: 'Peringatan' },
           }),
         }), { env: envOf(upstream, token) });
 
@@ -212,11 +214,18 @@ describe('perantara rahasia', { concurrency: 1 }, () => {
       for (const posted of posts) {
         assert.equal(posted.token, token);
         assert.equal(posted.contentType, 'text/plain;charset=utf-8');
+        assert.equal(posted.transferEncoding, '');
+        assert.equal(posted.contentLength, String(Buffer.byteLength(posted.body)));
         const parsed = JSON.parse(posted.body);
         assert.equal(parsed.token, token);
         assert.equal(parsed.extra, undefined);
         assert.equal(POST_ACTIONS.has(parsed.action), true);
-        assert.deepEqual(parsed.data, { id: parsed.action, catatan: 'aman' });
+        assert.deepEqual(parsed.data, {
+          id: parsed.action,
+          catatan: 'aman',
+          penyebab: 'pisau — tajam',
+          sanksi: 'Peringatan',
+        });
       }
 
       const echoes = upstream.requests.filter((item) => item.pathname === '/exec-final');

@@ -149,10 +149,11 @@ const VIOLATION_RESPONSE_SCHEMA = {
     jenis: { type: 'STRING', description: 'Jenis pelanggaran dalam bahasa Indonesia. String kosong jika tidak terlihat.' },
     tanggal: { type: 'STRING', description: 'Tanggal pelanggaran format YYYY-MM-DD. String kosong jika tidak terlihat.' },
     penyebab: { type: 'STRING', description: 'Penyebab pelanggaran yang tertulis di gambar, tanpa URL. String kosong jika tidak terlihat.' },
-    catatan: { type: 'STRING', description: 'Tindakan atau catatan perbaikan jika tertulis, tanpa URL. Jangan menyalin penyebab. String kosong jika tidak ada.' },
+    catatan: { type: 'STRING', description: 'Usulan evaluasi atau tindakan perbaikan, 1-3 kalimat bahasa Indonesia, tanpa URL. Jangan menyalin penyebab. Usulkan langkah yang masuk akal dari isi teguran bila gambar tidak menuliskan tindakannya.' },
+    sanksi: { type: 'STRING', description: 'Sanksi yang tertulis di gambar, misalnya Peringatan, Video dibatasi / tidak masuk FYP, Fitur dibatasi, Poin pelanggaran, atau Akun ditangguhkan. String kosong jika tidak terlihat. Jangan mengarang sanksi.' },
     status: { type: 'STRING', description: 'Hanya jika hasil banding terlihat: Belum Banding, Menunggu Banding, Banding Diterima, atau Banding Ditolak. Selain itu string kosong.' },
   },
-  required: ['akun', 'produk', 'jenis', 'tanggal', 'penyebab', 'catatan', 'status'],
+  required: ['akun', 'produk', 'jenis', 'tanggal', 'penyebab', 'catatan', 'sanksi', 'status'],
 };
 
 function labelList(value) {
@@ -172,7 +173,7 @@ export function buildViolationPrompt(accounts, types) {
   const typeLine = types.length ? types.join(' | ') : '(tidak ada daftar)';
   return [
     'Kamu membaca screenshot pemberitahuan pelanggaran dari TikTok atau TikTok Shop.',
-    'Balas hanya JSON dengan kunci akun, produk, jenis, tanggal, penyebab, catatan, dan status.',
+    'Balas hanya JSON dengan kunci akun, produk, jenis, tanggal, penyebab, catatan, sanksi, dan status.',
     'Jangan mengarang. Isi string kosong jika teksnya tidak terlihat di gambar.',
     'Jangan sertakan URL, tautan video, atau kunci linkVideo.',
     'akun: nama toko atau username. Jika cocok dengan salah satu akun berikut, salin teksnya persis:',
@@ -182,7 +183,8 @@ export function buildViolationPrompt(accounts, types) {
     typeLine,
     'tanggal: tanggal pelanggaran format YYYY-MM-DD.',
     'penyebab: penyebab pelanggaran yang tertulis di gambar, ringkas, bahasa Indonesia, tanpa URL.',
-    'catatan: tindakan atau catatan perbaikan jika tertulis, bahasa Indonesia, tanpa URL. Jangan menyalin penyebab.',
+    'catatan: usulan evaluasi atau tindakan perbaikan (apa yang harus diperbaiki atau langkah berikutnya), 1-3 kalimat bahasa Indonesia, tanpa URL. Jangan menyalin penyebab. Tetap usulkan tindakan yang masuk akal dari isi teguran bila gambar tidak menuliskan langkahnya.',
+    'sanksi: sanksi yang tertulis di gambar. Jika cocok, salin salah satu: Peringatan, Video dibatasi / tidak masuk FYP, Fitur dibatasi, Poin pelanggaran, Akun ditangguhkan. Jika tidak tertulis, string kosong. Jangan mengarang sanksi.',
     'status: hanya jika gambar menyebut hasil banding, salah satu dari Belum Banding, Menunggu Banding, Banding Diterima, Banding Ditolak. Jika tidak, string kosong.',
   ].join('\n');
 }
@@ -251,6 +253,7 @@ export function parseViolationNotice(text) {
     tanggal: isoDateOrEmpty(value.tanggal),
     penyebab: noticeText(value.penyebab, 500),
     catatan: noticeText(value.catatan, 500),
+    sanksi: noticeText(value.sanksi ?? value.Sanksi, 200),
     status: noticeStatus(value.status),
   };
 }

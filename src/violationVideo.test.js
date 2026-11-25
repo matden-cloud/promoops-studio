@@ -28,6 +28,22 @@ describe('saran analisis video pelanggaran', () => {
     assert.equal(applied.penjelasan.includes('tiktok.com'), false);
   });
 
+  test('evaluasi video tidak menimpa tindakan yang sudah diketik', () => {
+    const applied = applyVideoSuggestion({
+      penyebab: '',
+      catatan: 'Tindakan dari tim',
+      linkVideo: 'https://www.tiktok.com/sudah',
+    }, {
+      penyebab: 'Klaim obat di awal video',
+      evaluasi: 'Hapus kalimat sembuh total.',
+      penjelasan: 'Pada 0:03 ada klaim.',
+    });
+    assert.equal(applied.form.catatan, 'Tindakan dari tim');
+    assert.equal(applied.form.penyebab, 'Klaim obat di awal video');
+    assert.equal(applied.filled.catatan, undefined);
+    assert.deepEqual(applied.labels, ['penyebab']);
+  });
+
   test('uri file hanya diterima dari host Gemini', () => {
     assert.equal(
       safeClientFileUri('https://generativelanguage.googleapis.com/v1beta/files/abc_123'),

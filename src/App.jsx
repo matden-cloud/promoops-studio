@@ -27,10 +27,11 @@ import {
   accountOptionValue,
   appendNoticeShot,
   applyNoticeFields,
+  buildViolationWrite,
   imageFileFromClipboard,
-  sheetTanggal,
+  withViolationFields,
 } from './violationNotice.js';
-import { formatViolationDate, violationDateToIso, violationPenyebab } from './violationDisplay.js';
+import { formatViolationDate, violationDateToIso, violationPenyebab, violationSanksi } from './violationDisplay.js';
 import { applyVideoSuggestion } from './violationVideo.js';
 import AppBrand from './AppBrand.jsx';
 import InstallBanner from './InstallBanner.jsx';
@@ -80,6 +81,14 @@ const DEFAULT_VIOLATION_TYPES = [
   "Produk Tidak Sesuai Keranjang Kuning"
 ];
 
+const SANKSI_PRESETS = [
+  'Peringatan',
+  'Video dibatasi / tidak masuk FYP',
+  'Fitur dibatasi',
+  'Poin pelanggaran',
+  'Akun ditangguhkan',
+];
+
 const EMPTY_VIOLATION_FORM = {
   akun: '', 
   produk: '', 
@@ -87,10 +96,30 @@ const EMPTY_VIOLATION_FORM = {
   status: 'Belum Banding',
   catatan: '',
   penyebab: '',
+  sanksi: '',
   tanggal: '',
   linkVideo: '', 
   screenshots: []
 };
+
+function sameViolationId(left, right) {
+  return String(left) === String(right);
+}
+
+async function postSheetAction(action, data) {
+  const response = await fetch(APPS_SCRIPT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify({ action, data }),
+  });
+  const result = await response.json().catch(() => null);
+  if (!response.ok || result?.status === 'error') {
+    const message = typeof result?.message === 'string' ? result.message.trim() : '';
+    return { ok: false, message: message || 'Gagal menyimpan ke Google Sheets.' };
+  }
+  return { ok: true };
+}
 
 const normalizePersonName = (nameStr) => {
   if (!nameStr) return '';
@@ -385,6 +414,14 @@ export default function App() {
 
   // --- STATE HALAMAN PELANGGARAN ---
   const [violations, setViolations] = useState([]);
+  const violationsRef = useRef([]);
+  const [violationError, setViolationError] = useState('');
+  const [violationSaving, setViolationSaving] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  useEffect(() => {
+    violationsRef.current = violations;
+  }, [violations]);
   const [newViolation, setNewViolation] = useState(EMPTY_VIOLATION_FORM);
   const [editingViolationId, setEditingViolationId] = useState(null);
   const [violationTypes, setViolationTypes] = useState(DEFAULT_VIOLATION_TYPES);
@@ -418,7 +455,7 @@ export default function App() {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const response = await fetch(APPS_SCRIPT_ENDPOINT);
+      const response = await fetch(APPS_SCRIPT_ENDPOINT, { cache: 'no-store' });
       const result = await response.json();
       if (result.status === "success") {
         const validData = (result.data || []).filter(item => 
@@ -1376,10 +1413,11 @@ export default function App() {
   const handleQuickAddScreenshotsToRow = async (e, rowId) => {
     const files = Array.from(e.target.files);
     if (!files.length) return;
-    const targetItem = violations.find(v => v.id === rowId);
-    if (!targetItem) return;
+    e.target.value = '';
+    const existingRow = violationsRef.current.find((row) => sameViolationId(row.id, rowId));
+    if (!existingRow) return;
 
-    const existingSS = getViolationScreenshots(targetItem);
+    const existingSS = getViolationScreenshots(existingRow);
     const addedSS = [];
     for (let i = 0; i < files.length; i++) {
       const compressedBase64 = await compressImage(files[i]);
@@ -1390,18 +1428,20 @@ export default function App() {
       });
     }
 
-    const updatedItem = { ...targetItem, screenshots: [...existingSS, ...addedSS] };
-    setViolations(prev => prev.map(v => v.id === rowId ? updatedItem : v));
-    e.target.value = '';
+    const snapshot = violationsRef.current;
+    const current = snapshot.find((row) => sameViolationId(row.id, rowId)) || existingRow;
+    const updatedItem = withViolationFields(current, {
+      screenshots: [...getViolationScreenshots(current), ...addedSS],
+    });
+    const nextRows = snapshot.map((row) => (sameViolationId(row.id, rowId) ? updatedItem : row));
+    violationsRef.current = nextRows;
+    setViolations(nextRows);
 
-    try {
-      await fetch(APPS_SCRIPT_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_violation', data: updatedItem })
-      });
-    } catch (err) {
-      console.error("Gagal menambah SS ke Google Sheets", err);
+    const saved = await postSheetAction('update_violation', updatedItem);
+    if (!saved.ok) {
+      violationsRef.current = snapshot;
+      setViolations(snapshot);
+      setViolationError(saved.message || 'Gagal menambah screenshot. Data dikembalikan.');
     }
   };
 
@@ -1420,6 +1460,7 @@ export default function App() {
       status: item.status || 'Belum Banding',
       catatan: item.catatan === '-' ? '' : (item.catatan || ''),
       penyebab: violationPenyebab(item),
+      sanksi: violationSanksi(item),
       tanggal: violationDateToIso(item.tanggal),
       linkVideo: item.linkVideo || '',
       screenshots: getViolationScreenshots(item)
@@ -1472,24 +1513,48 @@ export default function App() {
   };
 
   const handleQuickStatusChange = async (id, newStatus) => {
-    const targetItem = violations.find(v => v.id === id);
+    const snapshot = violationsRef.current;
+    const targetItem = snapshot.find((row) => sameViolationId(row.id, id));
     if (!targetItem) return;
-    const updatedItem = { ...targetItem, status: newStatus, screenshots: getViolationScreenshots(targetItem) };
-    setViolations(prev => prev.map(v => v.id === id ? updatedItem : v));
+    const updatedItem = withViolationFields(targetItem, {
+      status: newStatus,
+      screenshots: getViolationScreenshots(targetItem),
+    });
+    const nextRows = snapshot.map((row) => (sameViolationId(row.id, id) ? updatedItem : row));
+    violationsRef.current = nextRows;
+    setViolations(nextRows);
 
-    try {
-      await fetch(APPS_SCRIPT_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'update_violation', data: updatedItem })
-      });
-    } catch (err) {
-      console.error("Gagal mengupdate status ke Sheets", err);
+    const saved = await postSheetAction('update_violation', updatedItem);
+    if (!saved.ok) {
+      violationsRef.current = snapshot;
+      setViolations(snapshot);
+      setViolationError(saved.message || 'Status gagal tersimpan. Data dikembalikan.');
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    const item = pendingDelete;
+    if (!item || deleteBusy) return;
+    const snapshot = violationsRef.current.slice();
+    const nextRows = snapshot.filter((row) => !sameViolationId(row.id, item.id));
+    violationsRef.current = nextRows;
+    setViolations(nextRows);
+    setDeleteBusy(true);
+    setViolationError('');
+    const saved = await postSheetAction('delete_violation', { id: item.id });
+    setDeleteBusy(false);
+    if (!saved.ok) {
+      violationsRef.current = snapshot;
+      setViolations(snapshot);
+      setViolationError(saved.message || 'Gagal menghapus pelanggaran. Data dikembalikan.');
+      return;
+    }
+    setPendingDelete(null);
   };
 
   const handleAddViolation = async (e) => {
     e.preventDefault();
+    if (violationSaving) return;
     const form = violationFormRef.current;
     if (!form.akun || !form.produk || !form.jenis) return;
 
@@ -1498,62 +1563,38 @@ export default function App() {
       setViolationTypes(prev => [...prev, cleanJenis]);
     }
     setIsCustomJenis(false);
+    setViolationError('');
 
-    if (editingViolationId !== null) {
-      const existingItem = violations.find(v => v.id === editingViolationId);
-      const updatedEntry = {
-        id: editingViolationId,
-        tanggal: sheetTanggal(form.tanggal) || existingItem?.tanggal || new Date().toLocaleDateString('id-ID'),
-        akun: form.akun,
-        produk: form.produk,
-        jenis: cleanJenis,
-        status: form.status || 'Belum Banding',
-        linkVideo: form.linkVideo || '',
-        screenshots: form.screenshots || [],
-        penyebab: String(form.penyebab || '').trim(),
-        catatan: form.catatan || '-'
-      };
-
-      setViolations(prev => prev.map(v => v.id === editingViolationId ? updatedEntry : v));
-      resetViolationForm();
-
-      try {
-        await fetch(APPS_SCRIPT_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'update_violation', data: updatedEntry })
-        });
-      } catch {
-        alert("Perubahan tampil di layar, namun gagal tersimpan ke Google Sheets.");
-      }
+    const editingId = editingViolationId;
+    const snapshot = violationsRef.current.slice();
+    const existingItem = editingId !== null
+      ? snapshot.find((row) => sameViolationId(row.id, editingId))
+      : null;
+    const entry = buildViolationWrite(
+      { ...form, jenis: cleanJenis },
+      {
+        id: editingId !== null ? editingId : createClientId(),
+        tanggalFallback: existingItem?.tanggal || new Date().toLocaleDateString('id-ID'),
+      },
+    );
+    const nextRows = editingId !== null
+      ? snapshot.map((row) => (sameViolationId(row.id, editingId) ? entry : row))
+      : [entry, ...snapshot];
+    violationsRef.current = nextRows;
+    setViolations(nextRows);
+    setViolationSaving(true);
+    const saved = await postSheetAction(
+      editingId !== null ? 'update_violation' : 'save_violation',
+      entry,
+    );
+    setViolationSaving(false);
+    if (!saved.ok) {
+      violationsRef.current = snapshot;
+      setViolations(snapshot);
+      setViolationError(saved.message || 'Gagal menyimpan ke Google Sheets. Periksa isian, lalu coba lagi.');
       return;
     }
-
-    const newEntry = {
-      id: createClientId(),
-      tanggal: sheetTanggal(form.tanggal) || new Date().toLocaleDateString('id-ID'),
-      akun: form.akun,
-      produk: form.produk,
-      jenis: cleanJenis,
-      status: form.status || 'Belum Banding',
-      linkVideo: form.linkVideo || '',
-      screenshots: form.screenshots || [],
-      penyebab: String(form.penyebab || '').trim(),
-      catatan: form.catatan || '-'
-    };
-
-    setViolations([newEntry, ...violations]);
     resetViolationForm();
-
-    try {
-      await fetch(APPS_SCRIPT_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save_violation', data: newEntry })
-      });
-    } catch {
-      alert("Gagal menyimpan ke Google Sheets, periksa koneksi internet Anda.");
-    }
   };
 
   // --- FUNGSI ASISTEN AI PEMBACA DATA WEB & GENERATOR MATERI PPT/PDF ---
@@ -3256,13 +3297,20 @@ export default function App() {
             onStatus={handleQuickStatusChange}
             onEdit={handleStartEditViolation}
             onAnalyze={handleAnalyzeRow}
+            onDelete={setPendingDelete}
           />
           <div className="mb-6 hidden lg:block">
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
-            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, baca screenshot, isi penyebab, lalu periksa sebelum simpan.</p>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, baca screenshot, isi penyebab dan sanksi, lalu periksa sebelum simpan.</p>
           </div>
+
+          {violationError && (
+            <p role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
+              {violationError}
+            </p>
+          )}
 
           <form
             id="formulir-pelanggaran"
@@ -3465,18 +3513,53 @@ export default function App() {
                 />
               </div>
 
-              <div className="flex min-w-0 flex-col sm:col-span-2 md:col-span-4">
-                <AutoFilledMark active={!!autoFilled.catatan} id="auto-catatan" />
+              <div className="flex min-w-0 flex-col sm:col-span-2 md:col-span-2">
+                <span className="mb-1 text-[10px] font-bold text-slate-500">Sanksi</span>
+                <AutoFilledMark active={!!autoFilled.sanksi} id="auto-sanksi" />
+                <select
+                  id="pelanggaran-sanksi"
+                  aria-label="Pilihan sanksi"
+                  aria-describedby={autoFilled.sanksi ? 'auto-sanksi' : undefined}
+                  value={SANKSI_PRESETS.includes(newViolation.sanksi) ? newViolation.sanksi : ''}
+                  onChange={(e) => {
+                    if (e.target.value) patchViolation({ sanksi: e.target.value });
+                  }}
+                  className={violationInputClass(!!autoFilled.sanksi)}
+                >
+                  <option value="">Pilih sanksi cepat...</option>
+                  {SANKSI_PRESETS.map((option) => (
+                    <option key={option} value={option}>{option}</option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex min-w-0 flex-col sm:col-span-2 md:col-span-2" htmlFor="pelanggaran-sanksi-teks">
+                <span className="mb-1 text-[10px] font-bold text-slate-500">Sanksi lain, ketik sendiri</span>
                 <input
+                  id="pelanggaran-sanksi-teks"
                   type="text"
-                  aria-label="Catatan perbaikan"
+                  aria-label="Sanksi"
+                  placeholder="Atau ketik sanksi lain"
+                  value={newViolation.sanksi}
+                  onChange={(e) => patchViolation({ sanksi: e.target.value })}
+                  className={violationInputClass(!!autoFilled.sanksi)}
+                />
+              </label>
+
+              <label className="flex min-w-0 flex-col sm:col-span-2 md:col-span-4" htmlFor="pelanggaran-evaluasi">
+                <span className="mb-1 text-[10px] font-bold text-slate-500">Evaluasi / Tindakan</span>
+                <AutoFilledMark active={!!autoFilled.catatan} id="auto-catatan" />
+                <textarea
+                  id="pelanggaran-evaluasi"
+                  aria-label="Evaluasi atau tindakan"
                   aria-describedby={autoFilled.catatan ? 'auto-catatan' : undefined}
-                  placeholder="Catatan perbaikan untuk tim..."
+                  placeholder="Apa yang harus diperbaiki atau langkah berikutnya. Bisa terisi otomatis dari screenshot atau analisis video, lalu diperiksa sebelum simpan."
                   value={newViolation.catatan}
                   onChange={(e) => patchViolation({ catatan: e.target.value })}
+                  rows={2}
                   className={violationInputClass(!!autoFilled.catatan)}
                 />
-              </div>
+              </label>
             </div>
 
             <ViolationVideoAnalysis
@@ -3524,8 +3607,8 @@ export default function App() {
             )}
 
             <div className="flex flex-wrap items-center gap-2">
-              <button type="submit" className={`${editingViolationId !== null ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm`}>
-                {editingViolationId !== null ? 'Simpan Perubahan Edit' : 'Simpan Data Pelanggaran'}
+              <button type="submit" disabled={violationSaving} className={`${editingViolationId !== null ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'} text-white font-bold text-xs md:text-sm px-5 py-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-60`}>
+                {violationSaving ? 'Menyimpan...' : (editingViolationId !== null ? 'Simpan Perubahan Edit' : 'Simpan Data Pelanggaran')}
               </button>
               {editingViolationId !== null && (
                 <button 
@@ -3541,16 +3624,16 @@ export default function App() {
 
           <div className="hidden lg:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1040px] table-fixed border-collapse text-left text-sm">
+              <table className="w-full min-w-[1120px] table-fixed border-collapse text-left text-sm">
                 <colgroup>
-                  <col className="w-[12%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[13%]" />
                   <col className="w-[14%]" />
                   <col className="w-[14%]" />
-                  <col className="w-[15%]" />
                   <col className="w-[12%]" />
-                  <col className="w-[15%]" />
-                  <col className="w-[12%]" />
-                  <col className="w-[6%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[11%]" />
                 </colgroup>
                 <thead>
                   <tr className="bg-red-50/60 text-red-900 border-b border-red-100 text-[11px] uppercase tracking-wide">
@@ -3573,9 +3656,10 @@ export default function App() {
                   {violations.map((v) => {
                     const rowScreenshots = getViolationScreenshots(v);
                     const penyebab = violationPenyebab(v);
+                    const sanksi = violationSanksi(v);
                     const tanggal = formatViolationDate(v.tanggal);
                     return (
-                      <tr key={v.id} className={`align-top hover:bg-gray-50 transition-colors ${editingViolationId === v.id ? 'bg-amber-50/40' : ''}`}>
+                      <tr key={v.id} className={`align-top hover:bg-gray-50 transition-colors ${sameViolationId(editingViolationId, v.id) ? 'bg-amber-50/40' : ''}`}>
                         <td className="px-3 py-3 align-top">
                           <p className="font-bold text-gray-900 break-words">{v.akun}</p>
                           <span className="mt-1 block text-xs text-gray-500">{tanggal || 'Tanpa tanggal'}</span>
@@ -3610,6 +3694,11 @@ export default function App() {
                         </td>
                         <td className="px-3 py-3 align-top">
                           <ViolationJenisPills jenis={v.jenis} />
+                          {sanksi && (
+                            <span className="mt-1.5 inline-flex max-w-full truncate rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800" title={sanksi}>
+                              {sanksi}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-3 align-top">
                           <ViolationClampText text={penyebab} className="text-gray-700" />
@@ -3650,13 +3739,22 @@ export default function App() {
                           <ViolationClampText text={v.catatan} empty="-" className="text-gray-600" />
                         </td>
                         <td className="px-2 py-3 align-top print:hidden">
-                          <button
-                            type="button"
-                            onClick={() => handleStartEditViolation(v)}
-                            className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-100"
-                          >
-                            <Edit3 className="h-3.5 w-3.5" /> Edit
-                          </button>
+                          <div className="flex flex-col items-stretch gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditViolation(v)}
+                              className="inline-flex items-center justify-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-100"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingDelete(v)}
+                              className="inline-flex items-center justify-center gap-1 rounded-lg border border-red-200 bg-white px-2 py-1.5 text-xs font-bold text-red-700 shadow-sm hover:bg-red-50"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" /> Hapus
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -3665,6 +3763,53 @@ export default function App() {
               </table>
             </div>
           </div>
+          {pendingDelete && (
+            <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-900/40 p-4 sm:items-center">
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="hapus-pelanggaran-judul"
+                className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+              >
+                <h3 id="hapus-pelanggaran-judul" className="text-base font-bold text-gray-900">Hapus data pelanggaran?</h3>
+                <p className="mt-2 text-sm font-semibold leading-relaxed text-gray-600">
+                  Data ini dihapus dari daftar. Kalau gagal, barisnya dikembalikan.
+                </p>
+                <dl className="mt-3 space-y-1.5 text-sm">
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 font-bold text-gray-500">Akun</dt>
+                    <dd className="font-semibold text-gray-900">{pendingDelete.akun || 'Tanpa akun'}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 font-bold text-gray-500">Produk</dt>
+                    <dd className="font-semibold text-gray-900">{pendingDelete.produk || 'Tanpa produk'}</dd>
+                  </div>
+                  <div className="flex gap-2">
+                    <dt className="w-16 shrink-0 font-bold text-gray-500">Tanggal</dt>
+                    <dd className="font-semibold text-gray-900">{formatViolationDate(pendingDelete.tanggal) || 'Tanpa tanggal'}</dd>
+                  </div>
+                </dl>
+                <div className="mt-4 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { if (!deleteBusy) setPendingDelete(null); }}
+                    disabled={deleteBusy}
+                    className="rounded-xl bg-gray-100 px-4 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmDelete}
+                    disabled={deleteBusy}
+                    className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    {deleteBusy ? 'Menghapus...' : 'Hapus'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

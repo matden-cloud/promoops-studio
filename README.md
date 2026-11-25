@@ -33,7 +33,7 @@ Perantara Apps Script hanya meneruskan aksi yang dipakai dashboard:
 
 - GET tanpa `action`: ambil data dashboard
 - GET `action=run_update`: jalankan pembaruan (memakai kuota RapidAPI)
-- POST `save_winning_web`, `save_winning_file`, `save_violation`, `update_violation`
+- POST `save_winning_web`, `save_winning_file`, `save_violation`, `update_violation`, `delete_violation`
 
 Aksi lain ditolak. `run_update` dapat berjalan sampai 60 detik (`maxDuration` di `vercel.json`). Naikkan batas itu bila paket Vercel mengizinkan dan bot membutuhkan waktu lebih lama.
 
@@ -49,7 +49,7 @@ Tombol **Sinkron Video Final** dan **Sinkron Mentahan** di tab **Sinkron Bot** m
 
 Tab **Jadwal Repliz** menyusun rencana upload TikTok dari Video Final, lalu mengirimnya ke Repliz hanya setelah tombol **Konfirmasi & kirim ke Repliz**. Chat Gemini (`/api/repliz-plan`) hanya mengisi tabel konfirmasi dan tidak membuat jadwal. URL yang dikirim ke Repliz adalah tautan bertanda tangan `/api/repliz-media`, bukan `downloadUrl` Microsoft yang singkat. Video produk Gantungan Bor ditahan dan tidak masuk ke rencana otomatis. Jika `REPLIZ_ACCESS_KEY`, `REPLIZ_SECRET_KEY`, atau `MEDIA_URL_SECRET` belum diisi, tab tetap terbuka dengan pesan konfigurasi.
 
-Tab **Pelanggaran** mengirim `penyebab` bersama data yang sudah ada (`save_violation` / `update_violation`). Kalau Apps Script belum menulis field itu, isian tetap tampil sampai halaman dimuat ulang, lalu kosong. Cara menambah kolom `Penyebab` ada di `apps-script/penyebab-pelanggaran-snippet.gs`. Jangan buat tab baru. Tombol **Analisis Video** memakai file OneDrive bila tautan TikTok-nya sama dengan postingan di rekap. Tautan TikTok tidak diunduh. Kalau OneDrive belum terhubung atau file tidak ketemu, unggah MP4 (di bawah 2,5 MB lewat server, sampai 80 MB langsung ke Gemini tanpa kunci di browser).
+Tab **Pelanggaran** mengirim `penyebab` dan `sanksi` bersama data yang sudah ada (`save_violation` / `update_violation`). Tombol **Hapus** mengirim `delete_violation` dengan `{ id }`. Kalau Apps Script belum menulis field itu, isian tetap tampil sampai halaman dimuat ulang, lalu kosong. Kolom `Penyebab` (J) dan `Sanksi` (K), plus cabang hapus, ada di `apps-script/pelanggaran-sanksi-hapus-snippet.gs`. Jangan buat tab baru. Tombol **Analisis Video** memakai file OneDrive bila tautan TikTok-nya sama dengan postingan di rekap. Tautan TikTok tidak diunduh. Kalau OneDrive belum terhubung atau file tidak ketemu, unggah MP4 (di bawah 2,5 MB lewat server, sampai 80 MB langsung ke Gemini tanpa kunci di browser).
 
 Tab **Editor Voice** hanya memakai mesin gratis. Replikasi suara Gemini dimatikan. Gemini tetap untuk suara bawaan dan desain suara lewat `/api/voice`. Fish Audio (`FISH_API_KEY`, model `s2.1-pro-free`) lewat `/api/voice?engine=fish` dan berhenti pada 1 Desember 2026 pukul 00.00 WIB. Inworld (`INWORLD_API_KEY`, model `inworld-tts-2-flash`) lewat `/api/voice?engine=inworld`; penghitung 65 menit ada di browser. Audio hasil tetap di IndexedDB. Kunci kosong menampilkan nama variabelnya dan tidak mematikan mesin lain. Ponsel membuka tab dari sheet **Lainnya**. Desktop menambah item nav **Editor Voice**. Kuota Gemini habis (HTTP 429) tetap dijelaskan sebagai batas harian.
 
