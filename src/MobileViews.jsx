@@ -457,9 +457,10 @@ export function MobileViolations({
       {items.map((item) => (
         <article key={item.id} className="rounded-[20px] border border-black/[0.06] bg-white p-3.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-extrabold">{item.produk || 'Tanpa produk'}</p>
-              <p className="text-[11px] font-semibold text-slate-500">{formatViolationDate(item.tanggal) || 'Tanpa tanggal'} · {item.akun || 'Tanpa akun'}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-extrabold leading-snug">{item.produk || 'Tanpa produk'}</p>
+              <p className="mt-0.5 text-sm font-extrabold leading-snug">{item.akun || 'Tanpa akun'}</p>
+              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{formatViolationDate(item.tanggal) || 'Tanpa tanggal'}</p>
             </div>
             <select
               aria-label={`Status banding ${item.produk || ''}`}
