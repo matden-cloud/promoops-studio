@@ -1,4 +1,6 @@
-export const NOTICE_FIELD_ORDER = ['akun', 'produk', 'jenis', 'tanggal', 'penyebab', 'catatan', 'status'];
+import { violationPenyebab, violationSanksi, violationTextBlank } from './violationDisplay.js';
+
+export const NOTICE_FIELD_ORDER = ['akun', 'produk', 'jenis', 'tanggal', 'penyebab', 'catatan', 'sanksi', 'status'];
 
 export const NOTICE_FIELD_LABELS = {
   akun: 'akun',
@@ -6,7 +8,8 @@ export const NOTICE_FIELD_LABELS = {
   jenis: 'jenis pelanggaran',
   tanggal: 'tanggal',
   penyebab: 'penyebab',
-  catatan: 'catatan',
+  catatan: 'evaluasi / tindakan',
+  sanksi: 'sanksi',
   status: 'status banding',
 };
 
@@ -129,9 +132,14 @@ export function applyNoticeFields(form, fields, { accounts = [], types = [] } = 
     filled.penyebab = true;
   }
   const catatan = cleanField(source.catatan, 500);
-  if (catatan) {
+  if (catatan && violationTextBlank(current.catatan)) {
     next.catatan = catatan;
     filled.catatan = true;
+  }
+  const sanksi = cleanField(source.sanksi ?? source.Sanksi, 200);
+  if (sanksi) {
+    next.sanksi = sanksi;
+    filled.sanksi = true;
   }
   if (STATUSES.has(source.status)) {
     next.status = source.status;
@@ -155,6 +163,38 @@ export function appendNoticeShot(form, image, id) {
     ...current,
     screenshots: [...shots, { id: id || `notice_${shots.length + 1}`, label: 'SS Teguran', url: image }],
   };
+}
+
+export function buildViolationWrite(form, { id, tanggalFallback = '' } = {}) {
+  const source = form && typeof form === 'object' ? form : {};
+  const catatan = String(source.catatan ?? '').trim();
+  return {
+    id,
+    tanggal: sheetTanggal(source.tanggal) || String(tanggalFallback || '').trim(),
+    akun: source.akun || '',
+    produk: source.produk || '',
+    jenis: String(source.jenis || '').trim(),
+    status: source.status || 'Belum Banding',
+    linkVideo: source.linkVideo || '',
+    penyebab: violationPenyebab(source),
+    sanksi: violationSanksi(source),
+    catatan: catatan && catatan !== '-' ? catatan : '-',
+    screenshots: Array.isArray(source.screenshots) ? source.screenshots : [],
+  };
+}
+
+export function withViolationFields(row, patch = {}) {
+  const source = row && typeof row === 'object' ? row : {};
+  const extra = patch && typeof patch === 'object' ? patch : {};
+  const next = { ...source, ...extra };
+  next.penyebab = violationPenyebab(next);
+  next.sanksi = violationSanksi(next);
+  if (Object.prototype.hasOwnProperty.call(extra, 'screenshots')) {
+    next.screenshots = Array.isArray(extra.screenshots) ? extra.screenshots : [];
+  } else if (!Array.isArray(next.screenshots)) {
+    next.screenshots = [];
+  }
+  return next;
 }
 
 export function imageFileFromClipboard(event) {

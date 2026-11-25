@@ -1,3 +1,5 @@
+import { violationTextBlank } from './violationDisplay.js';
+
 export const MAX_SERVER_VIDEO_BYTES = 2_500_000;
 export const MAX_DIRECT_VIDEO_BYTES = 80 * 1024 * 1024;
 
@@ -55,7 +57,7 @@ export function applyVideoSuggestion(form, fields) {
     filled.penyebab = true;
   }
   const catatan = evaluasiCatatan(fields);
-  if (catatan) {
+  if (catatan && violationTextBlank(current.catatan)) {
     next.catatan = catatan;
     filled.catatan = true;
   }

@@ -43,7 +43,8 @@ describe('Gemini membaca screenshot pelanggaran', () => {
           jenis: 'Klaim Berlebihan / Misleading',
           tanggal: '20 November 2026',
           penyebab: `produk tajam ${API_KEY} https://www.tiktok.com/@toko/video/1`,
-          catatan: `klaim medis ${API_KEY} https://www.tiktok.com/@toko/video/1`,
+          catatan: `Blur bagian tajam, lalu unggah ulang. ${API_KEY} https://www.tiktok.com/@toko/video/1`,
+          sanksi: `Peringatan ${API_KEY} https://www.tiktok.com/@toko/video/1`,
           status: 'ditolak',
           linkVideo: 'https://www.tiktok.com/@toko/video/1',
         }));
@@ -60,7 +61,12 @@ describe('Gemini membaca screenshot pelanggaran', () => {
     assert.equal(sent.generationConfig.responseSchema.type, 'OBJECT');
     assert.equal(sent.generationConfig.responseSchema.properties.linkVideo, undefined);
     assert.equal(typeof sent.generationConfig.responseSchema.properties.penyebab, 'object');
+    assert.equal(typeof sent.generationConfig.responseSchema.properties.sanksi, 'object');
+    assert.equal(sent.generationConfig.responseSchema.required.includes('sanksi'), true);
     assert.equal(sent.contents[0].parts[1].text.includes('penyebab:'), true);
+    assert.match(sent.contents[0].parts[1].text, /catatan: usulan evaluasi atau tindakan/);
+    assert.match(sent.contents[0].parts[1].text, /1-3 kalimat/);
+    assert.match(sent.contents[0].parts[1].text, /Jangan mengarang sanksi/);
     assert.equal(sent.generationConfig.thinkingConfig.thinkingLevel, 'MINIMAL');
     const body = await response.json();
     assert.deepEqual(body.fields, {
@@ -69,7 +75,8 @@ describe('Gemini membaca screenshot pelanggaran', () => {
       jenis: 'Klaim Berlebihan / Misleading',
       tanggal: '2026-11-20',
       penyebab: 'produk tajam [redacted]',
-      catatan: `klaim medis [redacted]`,
+      catatan: 'Blur bagian tajam, lalu unggah ulang. [redacted]',
+      sanksi: 'Peringatan [redacted]',
       status: '',
     });
     assert.equal(Object.hasOwn(body.fields, 'linkVideo'), false);
@@ -147,6 +154,9 @@ describe('Gemini membaca screenshot pelanggaran', () => {
     assert.equal(parseViolationNotice('{"status":"Banding Diterima"}').status, 'Banding Diterima');
     assert.equal(parseViolationNotice('{"penyebab":"produk tajam"}').penyebab, 'produk tajam');
     assert.equal(parseViolationNotice('{"jenis":"Audio"}').penyebab, '');
+    assert.equal(parseViolationNotice('{"jenis":"Audio"}').sanksi, '');
+    assert.equal(parseViolationNotice('{"sanksi":"Akun ditangguhkan"}').sanksi, 'Akun ditangguhkan');
+    assert.equal(parseViolationNotice('{"Sanksi":"Poin pelanggaran"}').sanksi, 'Poin pelanggaran');
     assert.equal(parseViolationNotice('{"status":"ditolak"}').status, '');
     assert.equal(parseViolationNotice('bukan'), null);
   });

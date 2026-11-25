@@ -5,6 +5,8 @@ import {
   violationDateToIso,
   violationJenisPills,
   violationPenyebab,
+  violationSanksi,
+  violationTextBlank,
   violationTextCanExpand,
 } from './violationDisplay.js';
 
@@ -53,7 +55,14 @@ describe('tampilan tanggal dan jenis pelanggaran', () => {
     assert.equal(violationPenyebab({}), '');
     assert.equal(violationPenyebab(null), '');
     assert.equal(violationPenyebab({ penyebab: '-' }), '');
+    assert.equal(violationPenyebab({ penyebab: '', Penyebab: 'dari kolom' }), 'dari kolom');
     assert.equal(violationPenyebab({ Penyebab: '  Klaim medis  ' }), 'Klaim medis');
     assert.equal(violationPenyebab({ cause: 'produk tajam' }), 'produk tajam');
+    assert.equal(violationSanksi({}), '');
+    assert.equal(violationSanksi({ sanksi: '-' }), '');
+    assert.equal(violationSanksi({ Sanksi: '  Peringatan  ' }), 'Peringatan');
+    assert.equal(violationTextBlank(''), true);
+    assert.equal(violationTextBlank('-'), true);
+    assert.equal(violationTextBlank('Sudah ditulis tim'), false);
   });
 });

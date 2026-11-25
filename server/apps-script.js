@@ -6,6 +6,7 @@ const POST_ACTIONS = new Set([
   'save_winning_file',
   'save_violation',
   'update_violation',
+  'delete_violation',
 ]);
 
 // Aksi OneDrive (token dan FILE_ASSET) sengaja tidak ada di daftar ini.
@@ -61,8 +62,17 @@ function defaultRequest(url, { method = 'GET', headers, body } = {}) {
   return new Promise((resolve, reject) => {
     const target = new URL(url);
     const lib = target.protocol === 'https:' ? https : http;
-    const options = { method };
-    if (headers) options.headers = headers;
+    const verb = String(method || 'GET').toUpperCase();
+    const options = { method: verb };
+    const reqHeaders = { ...(headers || {}) };
+    let payload = null;
+    if (body != null && verb !== 'GET' && verb !== 'HEAD') {
+      payload = Buffer.isBuffer(body) ? body : Buffer.from(String(body), 'utf8');
+      if (reqHeaders['Content-Length'] == null && reqHeaders['content-length'] == null) {
+        reqHeaders['Content-Length'] = String(payload.length);
+      }
+    }
+    if (Object.keys(reqHeaders).length > 0) options.headers = reqHeaders;
 
     const req = lib.request(target, options, (res) => {
       const chunks = [];
@@ -77,8 +87,8 @@ function defaultRequest(url, { method = 'GET', headers, body } = {}) {
     });
 
     req.on('error', reject);
-    if (body != null && method !== 'GET' && method !== 'HEAD') req.write(body);
-    req.end();
+    if (payload) req.end(payload);
+    else req.end();
   });
 }
 

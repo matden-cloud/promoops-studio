@@ -78,10 +78,30 @@ export function violationTextCanExpand(text) {
   return value.length > 90;
 }
 
-export function violationPenyebab(record) {
-  const source = record && typeof record === 'object' ? record : {};
-  const raw = source.penyebab ?? source.Penyebab ?? source.cause ?? '';
-  const text = String(raw ?? '').replace(/\s+/g, ' ').trim();
+function collapseText(value, max) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!text || text === '-' || text.toLowerCase() === 'null') return '';
-  return text.slice(0, 500);
+  return text.slice(0, max);
+}
+
+export function violationTextBlank(value) {
+  return collapseText(value, 2000) === '';
+}
+
+function firstStoredText(record, keys, max) {
+  const source = record && typeof record === 'object' ? record : {};
+  for (const key of keys) {
+    if (source[key] == null) continue;
+    const text = collapseText(source[key], max);
+    if (text) return text;
+  }
+  return '';
+}
+
+export function violationPenyebab(record) {
+  return firstStoredText(record, ['penyebab', 'Penyebab', 'cause'], 500);
+}
+
+export function violationSanksi(record) {
+  return firstStoredText(record, ['sanksi', 'Sanksi'], 200);
 }

@@ -15,7 +15,7 @@ import SearchBox from './SearchBox.jsx';
 import { canPlayTikTokUrl } from '../server/tiktok-url.js';
 import ViolationJenisPills from './ViolationJenisPills.jsx';
 import ViolationClampText from './ViolationClampText.jsx';
-import { formatViolationDate, violationPenyebab } from './violationDisplay.js';
+import { formatViolationDate, violationPenyebab, violationSanksi } from './violationDisplay.js';
 import {
   VIEW_BUCKETS,
   buildRekapProduk,
@@ -441,6 +441,7 @@ export function MobileViolations({
   onStatus,
   onEdit,
   onAnalyze,
+  onDelete,
 }) {
   return (
     <div className="mb-3 space-y-2.5 lg:hidden">
@@ -456,9 +457,10 @@ export function MobileViolations({
       {items.map((item) => (
         <article key={item.id} className="rounded-[20px] border border-black/[0.06] bg-white p-3.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">
           <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-extrabold">{item.produk || 'Tanpa produk'}</p>
-              <p className="text-[11px] font-semibold text-slate-500">{formatViolationDate(item.tanggal) || 'Tanpa tanggal'} · {item.akun || 'Tanpa akun'}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-extrabold leading-snug">{item.produk || 'Tanpa produk'}</p>
+              <p className="mt-0.5 text-sm font-extrabold leading-snug">{item.akun || 'Tanpa akun'}</p>
+              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{formatViolationDate(item.tanggal) || 'Tanpa tanggal'}</p>
             </div>
             <select
               aria-label={`Status banding ${item.produk || ''}`}
@@ -472,7 +474,14 @@ export function MobileViolations({
               <option>Banding Ditolak</option>
             </select>
           </div>
-          <div className="mt-1.5"><ViolationJenisPills jenis={item.jenis} /></div>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <ViolationJenisPills jenis={item.jenis} />
+            {violationSanksi(item) && (
+              <span className="inline-flex max-w-full truncate rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-800">
+                {violationSanksi(item)}
+              </span>
+            )}
+          </div>
           {violationPenyebab(item) && (
             <div className="mt-1.5">
               <ViolationClampText text={violationPenyebab(item)} label="Penyebab" className="text-slate-600" />
@@ -491,6 +500,7 @@ export function MobileViolations({
               <Film className="h-2.5 w-2.5" aria-hidden="true" /> Analisis Video
             </button>
             <button type="button" onClick={() => onEdit(item)} className="text-[11px] font-bold text-amber-800">Edit</button>
+            <button type="button" onClick={() => onDelete?.(item)} className="text-[11px] font-bold text-red-700">Hapus</button>
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
             {(item.shots || []).map((shot, index) => (
