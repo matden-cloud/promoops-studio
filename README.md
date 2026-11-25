@@ -33,7 +33,7 @@ Perantara Apps Script hanya meneruskan aksi yang dipakai dashboard:
 
 - GET tanpa `action`: ambil data dashboard
 - GET `action=run_update`: jalankan pembaruan (memakai kuota RapidAPI)
-- POST `save_winning_web`, `save_winning_file`, `save_violation`, `update_violation`, `delete_violation`
+- POST `save_winning_web`, `save_winning_file`, `save_violation`, `update_violation`, `delete_violation`, `update_file_status`
 
 Aksi lain ditolak. `run_update` dapat berjalan sampai 60 detik (`maxDuration` di `vercel.json`). Naikkan batas itu bila paket Vercel mengizinkan dan bot membutuhkan waktu lebih lama.
 
@@ -48,6 +48,8 @@ Tombol **Sinkron Video Final** dan **Sinkron Mentahan** di tab **Sinkron Bot** m
 `GET /api/onedrive-stream?id=<Id_File>` memutar file OneDrive di dalam dashboard. Id diperiksa, token diambil dengan cara yang sama seperti sinkron (`get_onedrive_token` / `save_onedrive_token`), lalu browser diarahkan ke tautan unduh singkat dari Microsoft. Token tidak dikirim ke browser.
 
 Tab **Jadwal Repliz** menyusun rencana upload TikTok dari Video Final, lalu mengirimnya ke Repliz hanya setelah tombol **Konfirmasi & kirim ke Repliz**. Chat Gemini (`/api/repliz-plan`) hanya mengisi tabel konfirmasi dan tidak membuat jadwal. URL yang dikirim ke Repliz adalah tautan bertanda tangan `/api/repliz-media`, bukan `downloadUrl` Microsoft yang singkat. Video produk Gantungan Bor ditahan dan tidak masuk ke rencana otomatis. Jika `REPLIZ_ACCESS_KEY`, `REPLIZ_SECRET_KEY`, atau `MEDIA_URL_SECRET` belum diisi, tab tetap terbuka dengan pesan konfigurasi.
+
+Di modal daftar file mentahan, tombol **Sudah Dipakai** dan **Belum Dipakai** mengirim `update_file_status` dengan `Id_File`, `Raw_Asset_Id`, `Nama_File`, dan `status`. Cabang Apps Script ada di `apps-script/update-file-status.gs` (menulis kolom `Status_File` yang sudah ada, tanpa tab atau kolom baru). Menulis **Belum Dipakai** hanya bertahan bila `Raw_Asset_Id` tidak ada di `Klip_Vidio_RAW`, karena doGet tetap menandai file itu terpakai. Target upload harian di Rekap dijumlah dari video per akun aktif (bawaan 3) dan disimpan di browser pada kunci `rekapUploadTargets`.
 
 Tab **Pelanggaran** mengirim `penyebab` dan `sanksi` bersama data yang sudah ada (`save_violation` / `update_violation`). Tombol **Hapus** mengirim `delete_violation` dengan `{ id }`. Kalau Apps Script belum menulis field itu, isian tetap tampil sampai halaman dimuat ulang, lalu kosong. Kolom `Penyebab` (J) dan `Sanksi` (K), plus cabang hapus, ada di `apps-script/pelanggaran-sanksi-hapus-snippet.gs`. Jangan buat tab baru. Tombol **Analisis Video** memakai file OneDrive bila tautan TikTok-nya sama dengan postingan di rekap. Tautan TikTok tidak diunduh. Kalau OneDrive belum terhubung atau file tidak ketemu, unggah MP4 (di bawah 2,5 MB lewat server, sampai 80 MB langsung ke Gemini tanpa kunci di browser).
 

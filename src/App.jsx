@@ -7,6 +7,22 @@ import {
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
   Play, Smartphone, Package, CalendarClock, Mic, Film
 } from 'lucide-react';
+import { UploadTargetButton } from './UploadTargetControl.jsx';
+import {
+  collectKlipRawUsage,
+  fileStatusPayload,
+  isMentahanFile,
+  mentahanStatusAction,
+  rawFileMeta,
+  withListedFileStatus,
+  withRawStatus,
+} from './rawFileStatus.js';
+import {
+  loadUploadTargets,
+  normalizePerDay,
+  saveUploadTargets,
+  summarizeUploadTarget,
+} from './uploadTarget.js';
 import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
 import { isItemId } from '../server/onedrive-plan.js';
@@ -266,6 +282,37 @@ function fileLinkHp(row) {
   return safeHttpUrl(row?.linkHp || row?.Link_HP || row?.link_hp || '');
 }
 
+function MentahanStatusControl({ file, usage, busy, error, onChange }) {
+  if (!isMentahanFile(file)) return null;
+  const action = mentahanStatusAction(file, usage);
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      {action.canMarkUsed && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onChange(file, 'Sudah Dipakai')}
+          className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+        >
+          {busy ? 'Menyimpan...' : 'Sudah Dipakai'}
+        </button>
+      )}
+      {action.canRevert && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onChange(file, 'Belum Dipakai')}
+          className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+        >
+          {busy ? 'Menyimpan...' : 'Belum Dipakai'}
+        </button>
+      )}
+      <span className="text-[10px] font-medium leading-snug text-gray-500">{action.hint}</span>
+      {error && <span role="alert" className="text-[10px] font-semibold text-red-600">{error}</span>}
+    </div>
+  );
+}
+
 function FileLinkActions({ file, onPlay }) {
   const pageUrl = safeHttpUrl(file?.url);
   const linkHp = safeHttpUrl(file?.linkHp);
@@ -371,6 +418,7 @@ export default function App() {
     { id: 'AKN_005', nama: 'Pasar Digitals', label: 'AKN_005 - Pasar Digitals', pemegang: 'Rizal' },
     { id: 'AKN_006', nama: 'Hasil Seleksi', label: 'AKN_006 - Hasil Seleksi', pemegang: '' },
   ]);
+  const [uploadTargets, setUploadTargets] = useState(() => loadUploadTargets());
   const [productGroups, setProductGroups] = useState({});
   const [loading, setLoading] = useState(true);
   const [, setError] = useState(null);
@@ -410,6 +458,9 @@ export default function App() {
 
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
+  const [rawStatusBusyKey, setRawStatusBusyKey] = useState('');
+  const [rawStatusError, setRawStatusError] = useState(null);
+  const rawStatusBusyRef = useRef(false);
   const [tiktokPlayer, setTiktokPlayer] = useState(null);
   const [comparePick, setComparePick] = useState([]);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -571,6 +622,24 @@ export default function App() {
     });
     return map;
   }, [masterAccounts]);
+
+  const uploadPlan = useMemo(
+    () => summarizeUploadTarget(masterAccounts, uploadTargets),
+    [masterAccounts, uploadTargets],
+  );
+  const dailyUploadTarget = uploadPlan.total;
+
+  const setAccountUploadTarget = (id, value) => {
+    const perDay = normalizePerDay(value);
+    if (perDay == null) return;
+    setUploadTargets((current) => {
+      const next = { ...current, [id]: perDay };
+      saveUploadTargets(next);
+      return next;
+    });
+  };
+
+  const klipRawUsage = useMemo(() => collectKlipRawUsage(klipVideos), [klipVideos]);
 
   const getWinningKey = (produkName) => `${rekapBulan}__${produkName}`;
 
@@ -746,7 +815,7 @@ export default function App() {
         m.rawDatesSet.add(r.date);
       }
       m.rawFiles.push({
-        fileKey: `RAW__${r.id || r.fileName || idx}`,
+        ...rawFileMeta(r, idx, klipRawUsage),
         kategori: 'Mentahan (Raw_Asset)',
         produk: r.produk,
         name: `${r.fileName} (${r.produk})`,
@@ -853,8 +922,10 @@ export default function App() {
       const estKlipBulanan = isCurrentMonth ? Math.round((item.produksi / activeSpanDays) * item.daysInMonth) : item.produksi;
       const estPubBulanan = isCurrentMonth ? Math.round((item.publish / activeSpanDays) * item.daysInMonth) : item.publish;
 
-      const targetBerjalan = workDaysPub * 15;
-      const powerPercentage = item.publish > 0 ? Math.round((item.publish / targetBerjalan) * 100) : 0;
+      const targetBerjalan = workDaysPub * dailyUploadTarget;
+      const powerPercentage = targetBerjalan > 0
+        ? Math.round((item.publish / targetBerjalan) * 100)
+        : (item.publish > 0 ? 100 : 0);
 
       return {
         ...item,
@@ -872,7 +943,7 @@ export default function App() {
         powerPercentage
       };
     });
-  }, [rawAssets, klipVideos, publishVideos, data, rekapProduk, rekapTim, accountLookup, debouncedPipelineQuery]);
+  }, [rawAssets, klipVideos, publishVideos, data, rekapProduk, rekapTim, accountLookup, debouncedPipelineQuery, dailyUploadTarget, klipRawUsage]);
 
   // Potong kartu bulan sesuai pilihan tampilan (Per 3 Bulan, Per 6 Bulan, atau Semua)
   const totalMonthPages = Math.max(1, Math.ceil(monthlyPowerCards.length / monthViewLimit));
@@ -988,14 +1059,15 @@ export default function App() {
       const cleanCreator = normalizePersonName(r.creator);
       if (cleanCreator) entry.creators.add(cleanCreator);
 
-      const fileKey = `RAW__${r.id || r.fileName || idx}`;
+      const rawMeta = rawFileMeta(r, idx, klipRawUsage);
+      const fileKey = rawMeta.fileKey;
       const rawStarMonth = starMonthForSelection(rekapBulan, r.month);
       if (displayedStarFromIndex(starMode, starIndex, fileKey, rawStarMonth, winningFilesMap).isWinning) {
         entry.starredFilesCount += 1;
       }
 
       entry.rawFiles.push({
-        fileKey,
+        ...rawMeta,
         kategori: 'Mentahan (Raw_Asset)',
         produk: r.produk,
         name: r.fileName || r.id,
@@ -1066,7 +1138,7 @@ export default function App() {
     return Object.values(map)
       .filter(item => !onlyWinning || item.isWinning || item.starredFilesCount > 0)
       .sort((a, b) => b[sortBy] - a[sortBy]);
-  }, [visibleRawList, visibleKlipList, visibleUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy, starMode, starIndex]);
+  }, [visibleRawList, visibleKlipList, visibleUploadList, winningWebMap, winningFilesMap, productGroups, accountLookup, rekapBulan, onlyWinning, sortBy, starMode, starIndex, klipRawUsage]);
 
   // --- AGREGASI TABEL KANAN: TRACKING HARIAN ---
   const aggregatedDaily = useMemo(() => {
@@ -1081,7 +1153,7 @@ export default function App() {
           mentahan: 0,
           diedit: 0,
           upload: 0,
-          target: 15,
+          target: dailyUploadTarget,
           rawFiles: [],
           klipFiles: [],
           uploadFiles: []
@@ -1095,7 +1167,7 @@ export default function App() {
       if (!d) return;
       d.mentahan += 1;
       d.rawFiles.push({
-        fileKey: `RAW__${r.id || r.fileName || idx}`,
+        ...rawFileMeta(r, idx, klipRawUsage),
         kategori: 'Mentahan (Raw_Asset)',
         produk: r.produk,
         name: `${r.fileName} (${r.produk})`,
@@ -1147,7 +1219,7 @@ export default function App() {
     });
 
     return Object.values(map).sort((a, b) => b.tanggal.localeCompare(a.tanggal));
-  }, [visibleRawList, visibleKlipList, visibleUploadList, accountLookup]);
+  }, [visibleRawList, visibleKlipList, visibleUploadList, accountLookup, dailyUploadTarget, klipRawUsage]);
 
   const totalMentahanRekap = visibleRawList.length;
   const totalBelumDipakaiRekap = visibleRawList.filter(r => r.status === 'Belum Dipakai').length;
@@ -1156,6 +1228,27 @@ export default function App() {
   const totalUploadRekap = visibleUploadList.length;
   const pipelineTotal = filteredRawList.length + filteredKlipList.length + filteredUploadList.length;
   const pipelineShown = totalMentahanRekap + totalFinalRekap + totalUploadRekap;
+
+  const updateRawFileStatus = async (file, status) => {
+    if (!file?.fileKey || rawStatusBusyRef.current || file.status === status) return;
+    const previousRows = rawAssets;
+    const previousItems = drillDownModal?.items;
+    rawStatusBusyRef.current = true;
+    setRawStatusError(null);
+    setRawStatusBusyKey(file.fileKey);
+    setRawAssets((rows) => withRawStatus(rows, file, status));
+    setDrillDownModal((modal) => (
+      modal ? { ...modal, items: withListedFileStatus(modal.items, file, status) } : modal
+    ));
+    const saved = await postSheetAction('update_file_status', fileStatusPayload(file, status));
+    rawStatusBusyRef.current = false;
+    setRawStatusBusyKey('');
+    if (!saved.ok) {
+      setRawAssets(previousRows);
+      setDrillDownModal((modal) => (modal ? { ...modal, items: previousItems || modal.items } : modal));
+      setRawStatusError({ fileKey: file.fileKey, message: saved.message || 'Gagal menyimpan status file.' });
+    }
+  };
 
   const openRealFilesModal = (title, kategori, filesArray, reportMonth = rekapBulan) => {
     if (!filesArray || filesArray.length === 0) return;
@@ -1646,7 +1739,7 @@ export default function App() {
       - Rekap Power Kekuatan Seluruh Bulan: ${monthlyPowerSummary}.
       - Total Mentahan Terfilter: ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
       - Total Video Final Terfilter: ${totalFinalRekap} klip.
-      - Total Upload Terfilter: ${totalUploadRekap} video tayang (Target harian: 15 video/hari).
+      - Total Upload Terfilter: ${totalUploadRekap} video tayang (${uploadPlan.caption}).
       - 8 Produk Teratas: ${topProdsText}.
       - Total Pelanggaran Tercatat: ${violations.length} kasus.
     `;
@@ -1962,6 +2055,13 @@ export default function App() {
                               {file.status}
                             </span>
                           </div>
+                          <MentahanStatusControl
+                            file={file}
+                            usage={klipRawUsage}
+                            busy={rawStatusBusyKey === file.fileKey}
+                            error={rawStatusError?.fileKey === file.fileKey ? rawStatusError.message : ''}
+                            onChange={updateRawFileStatus}
+                          />
 
                           <input
                             key={`${file.fileKey || idx}-${bulan}`}
@@ -2323,6 +2423,15 @@ export default function App() {
           cards={visibleMonthlyCards}
           onOpenFiles={openRealFilesModal}
           totals={{ mentahan: totalMentahanRekap, belum: totalBelumDipakaiRekap, final: totalFinalRekap, upload: totalUploadRekap }}
+          uploadHint={uploadPlan.statHint}
+          monthTargetLabel={uploadPlan.shortCaption}
+          targetControl={(
+            <UploadTargetButton
+              rows={uploadPlan.rows}
+              total={uploadPlan.total}
+              onChange={setAccountUploadTarget}
+            />
+          )}
           ranking={aggregatedProducts}
           sortBy={sortBy}
           onSort={setSortBy}
@@ -2630,7 +2739,7 @@ export default function App() {
                           <div className="space-y-1">
                             <div className="flex justify-between text-[10px] font-semibold text-gray-500">
                               <span>Sisa Mentahan: <strong className="text-gray-800">{m.mentahanBelumDipakai} raw</strong></span>
-                              <span>Target 15/hr</span>
+                              <span>{uploadPlan.shortCaption}</span>
                             </div>
                             <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
                               <div
@@ -2683,7 +2792,6 @@ export default function App() {
                 <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-amber-600 transition-colors">
                   {loading ? '...' : totalFinalRekap} <span className="text-sm font-semibold text-gray-400">klip selesai (Klik)</span>
                 </h3>
-                <p className="text-xs text-gray-500 mt-1">Berdasarkan Tanggal_Selesai di Klip_Vidio</p>
               </div>
               <div className="p-3 bg-amber-50 text-amber-600 rounded-xl font-bold text-xs">Editor</div>
             </div>
@@ -2701,7 +2809,14 @@ export default function App() {
                 <h3 className="text-3xl font-black text-gray-900 mt-1 group-hover:text-emerald-600 transition-colors">
                   {loading ? '...' : totalUploadRekap} <span className="text-sm font-semibold text-gray-400">tayang (Klik)</span>
                 </h3>
-                <p className="text-xs text-emerald-600 font-semibold mt-1">Target: 5 Akun × 3 Video (15/hari)</p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <p className="text-xs text-emerald-600 font-semibold">{uploadPlan.caption}</p>
+                  <UploadTargetButton
+                    rows={uploadPlan.rows}
+                    total={uploadPlan.total}
+                    onChange={setAccountUploadTarget}
+                  />
+                </div>
               </div>
               <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs">Publish</div>
             </div>
