@@ -1,3 +1,9 @@
+import {
+  VIDEO_ANALYSIS_SCHEMA,
+  analyzeViolationVideo,
+  startViolationVideoUpload,
+} from './violation-video.js';
+
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 
 const MODEL_NAME = /^[A-Za-z0-9.-]+$/;
@@ -13,11 +19,12 @@ export function buildGeminiEndpoint(model) {
 export const GEMINI_ENDPOINT = buildGeminiEndpoint(DEFAULT_GEMINI_MODEL);
 
 class HttpError extends Error {
-  constructor(status, message, code, detail) {
+  constructor(status, message, code, detail, extra) {
     super(message);
     this.status = status;
     this.code = code;
     this.detail = detail;
+    this.extra = extra && typeof extra === 'object' ? extra : null;
   }
 }
 
@@ -141,10 +148,11 @@ const VIOLATION_RESPONSE_SCHEMA = {
     produk: { type: 'STRING', description: 'Nama produk. String kosong jika tidak terlihat.' },
     jenis: { type: 'STRING', description: 'Jenis pelanggaran dalam bahasa Indonesia. String kosong jika tidak terlihat.' },
     tanggal: { type: 'STRING', description: 'Tanggal pelanggaran format YYYY-MM-DD. String kosong jika tidak terlihat.' },
-    catatan: { type: 'STRING', description: 'Alasan atau penjelasan pelanggaran, tanpa URL. String kosong jika tidak terlihat.' },
+    penyebab: { type: 'STRING', description: 'Penyebab pelanggaran yang tertulis di gambar, tanpa URL. String kosong jika tidak terlihat.' },
+    catatan: { type: 'STRING', description: 'Tindakan atau catatan perbaikan jika tertulis, tanpa URL. Jangan menyalin penyebab. String kosong jika tidak ada.' },
     status: { type: 'STRING', description: 'Hanya jika hasil banding terlihat: Belum Banding, Menunggu Banding, Banding Diterima, atau Banding Ditolak. Selain itu string kosong.' },
   },
-  required: ['akun', 'produk', 'jenis', 'tanggal', 'catatan', 'status'],
+  required: ['akun', 'produk', 'jenis', 'tanggal', 'penyebab', 'catatan', 'status'],
 };
 
 function labelList(value) {
@@ -164,7 +172,7 @@ export function buildViolationPrompt(accounts, types) {
   const typeLine = types.length ? types.join(' | ') : '(tidak ada daftar)';
   return [
     'Kamu membaca screenshot pemberitahuan pelanggaran dari TikTok atau TikTok Shop.',
-    'Balas hanya JSON dengan kunci akun, produk, jenis, tanggal, catatan, dan status.',
+    'Balas hanya JSON dengan kunci akun, produk, jenis, tanggal, penyebab, catatan, dan status.',
     'Jangan mengarang. Isi string kosong jika teksnya tidak terlihat di gambar.',
     'Jangan sertakan URL, tautan video, atau kunci linkVideo.',
     'akun: nama toko atau username. Jika cocok dengan salah satu akun berikut, salin teksnya persis:',
@@ -173,7 +181,8 @@ export function buildViolationPrompt(accounts, types) {
     'jenis: jenis pelanggaran dalam bahasa Indonesia. Jika cocok dengan salah satu jenis berikut, salin teksnya persis:',
     typeLine,
     'tanggal: tanggal pelanggaran format YYYY-MM-DD.',
-    'catatan: alasan atau penjelasan pelanggaran, ringkas, bahasa Indonesia, tanpa URL.',
+    'penyebab: penyebab pelanggaran yang tertulis di gambar, ringkas, bahasa Indonesia, tanpa URL.',
+    'catatan: tindakan atau catatan perbaikan jika tertulis, bahasa Indonesia, tanpa URL. Jangan menyalin penyebab.',
     'status: hanya jika gambar menyebut hasil banding, salah satu dari Belum Banding, Menunggu Banding, Banding Diterima, Banding Ditolak. Jika tidak, string kosong.',
   ].join('\n');
 }
@@ -240,6 +249,7 @@ export function parseViolationNotice(text) {
     produk: noticeText(value.produk, 160),
     jenis: noticeText(value.jenis, 160),
     tanggal: isoDateOrEmpty(value.tanggal),
+    penyebab: noticeText(value.penyebab, 500),
     catatan: noticeText(value.catatan, 500),
     status: noticeStatus(value.status),
   };
@@ -352,6 +362,31 @@ function upstreamDetail(upstream, result, apiKey) {
   return redacted.length > 1000 ? `${redacted.slice(0, 1000)}…` : redacted;
 }
 
+async function runViolationVideoAction(payload, deps) {
+  const action = textField(payload?.action);
+  const generationConfig = generationConfigFor(deps.model, 0.2, 1536);
+  generationConfig.responseMimeType = 'application/json';
+  generationConfig.responseSchema = VIDEO_ANALYSIS_SCHEMA;
+  const runner = action === 'start_violation_video_upload' ? startViolationVideoUpload : analyzeViolationVideo;
+  const result = await runner(payload, {
+    apiKey: deps.apiKey,
+    fetchImpl: deps.fetchImpl,
+    endpoint: deps.endpoint,
+    env: deps.env,
+    requestImpl: deps.requestImpl,
+    sleep: deps.sleep,
+    mintDownload: deps.mintDownload,
+    generationConfig,
+    extractText,
+  });
+  if (!result?.ok) {
+    throw new HttpError(result?.status || 502, result?.message || 'Gagal menganalisis video.', result?.code || 'gemini_error', result?.detail, result?.extra);
+  }
+  const body = result.body && typeof result.body === 'object' ? { ...result.body } : {};
+  if (typeof body.message === 'string') body.message = redactSecrets(body.message, deps.apiKey);
+  return json(body, result.status || 200);
+}
+
 async function routeGemini(request, deps) {
   if (request.method.toUpperCase() !== 'POST') {
     throw new HttpError(405, 'Metode tidak diizinkan.', 'method_not_allowed');
@@ -381,6 +416,19 @@ async function routeGemini(request, deps) {
 
   if (textField(payload?.action) === 'read_violation') {
     return readViolationNotice(payload, { model, endpoint, apiKey, fetchImpl });
+  }
+
+  if (textField(payload?.action) === 'start_violation_video_upload' || textField(payload?.action) === 'analyze_violation_video') {
+    return runViolationVideoAction(payload, {
+      model,
+      endpoint,
+      apiKey,
+      fetchImpl,
+      env,
+      requestImpl: deps.requestImpl,
+      sleep: deps.sleep,
+      mintDownload: deps.mintDownload,
+    });
   }
 
   const prompt = payload?.prompt;
@@ -434,6 +482,8 @@ export async function handleGeminiRequest(request, deps = {}) {
     if (err instanceof HttpError) {
       const body = { error: err.code, message: err.message };
       if (typeof err.detail === 'string' && err.detail !== '') body.detail = err.detail;
+      if (err.extra?.needsUpload === true) body.needsUpload = true;
+      if (err.extra?.needsLogin === true) body.needsLogin = true;
       return json(body, err.status);
     }
     return json({ error: 'gemini_error', message: 'Gagal menghubungi Gemini.' }, 502);

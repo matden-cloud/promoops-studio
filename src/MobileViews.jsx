@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  Film,
   Image as ImageIcon,
   Play,
   Plus,
@@ -12,6 +13,9 @@ import {
 } from 'lucide-react';
 import SearchBox from './SearchBox.jsx';
 import { canPlayTikTokUrl } from '../server/tiktok-url.js';
+import ViolationJenisPills from './ViolationJenisPills.jsx';
+import ViolationClampText from './ViolationClampText.jsx';
+import { formatViolationDate, violationPenyebab } from './violationDisplay.js';
 import {
   VIEW_BUCKETS,
   buildRekapProduk,
@@ -436,6 +440,7 @@ export function MobileViolations({
   onAddShots,
   onStatus,
   onEdit,
+  onAnalyze,
 }) {
   return (
     <div className="mb-3 space-y-2.5 lg:hidden">
@@ -453,7 +458,7 @@ export function MobileViolations({
           <div className="flex items-start justify-between gap-2">
             <div>
               <p className="text-sm font-extrabold">{item.produk || 'Tanpa produk'}</p>
-              <p className="text-[11px] font-semibold text-slate-500">{item.tanggal || 'Tanpa tanggal'} · {item.akun || 'Tanpa akun'}</p>
+              <p className="text-[11px] font-semibold text-slate-500">{formatViolationDate(item.tanggal) || 'Tanpa tanggal'} · {item.akun || 'Tanpa akun'}</p>
             </div>
             <select
               aria-label={`Status banding ${item.produk || ''}`}
@@ -467,7 +472,12 @@ export function MobileViolations({
               <option>Banding Ditolak</option>
             </select>
           </div>
-          {item.jenis && <span className="mt-1.5 inline-block rounded-lg border border-red-200 bg-red-50 px-2 py-0.5 text-[10.5px] font-extrabold text-red-700">{item.jenis}</span>}
+          <div className="mt-1.5"><ViolationJenisPills jenis={item.jenis} /></div>
+          {violationPenyebab(item) && (
+            <div className="mt-1.5">
+              <ViolationClampText text={violationPenyebab(item)} label="Penyebab" className="text-slate-600" />
+            </div>
+          )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {canPlayTikTokUrl(item.linkVideo) && (
               <button type="button" onClick={() => onPlay(item)} className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2 py-1 text-[11px] font-extrabold text-white">
@@ -477,6 +487,9 @@ export function MobileViolations({
             {item.linkVideo && (
               <a href={item.linkVideo} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-blue-600">Buka Video</a>
             )}
+            <button type="button" onClick={() => onAnalyze?.(item)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] font-extrabold text-slate-800">
+              <Film className="h-2.5 w-2.5" aria-hidden="true" /> Analisis Video
+            </button>
             <button type="button" onClick={() => onEdit(item)} className="text-[11px] font-bold text-amber-800">Edit</button>
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
@@ -490,7 +503,11 @@ export function MobileViolations({
               <input type="file" accept="image/*" multiple className="hidden" onChange={(event) => onAddShots(event, item.id)} />
             </label>
           </div>
-          {item.catatan && <p className="mt-2 text-[11px] font-medium leading-snug text-slate-500">Catatan: {item.catatan}</p>}
+          {item.catatan && item.catatan !== '-' && (
+            <div className="mt-2">
+              <ViolationClampText text={item.catatan} label="Evaluasi" className="text-slate-500" />
+            </div>
+          )}
         </article>
       ))}
     </div>

@@ -5,7 +5,7 @@ import {
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
-  Play, Smartphone, Package, CalendarClock, Mic
+  Play, Smartphone, Package, CalendarClock, Mic, Film
 } from 'lucide-react';
 import { originalUrlForFypRow, originalUrlForPublish, findKlipByFileId, klipIdForFypRow, matchOneDriveForTikTokPage } from '../server/klip-match.js';
 import { buildTikTokEmbedUrl, canPlayTikTokUrl, inspectTikTokUrl } from '../server/tiktok-url.js';
@@ -18,6 +18,9 @@ import RekapProdukPanel from './RekapProdukPanel.jsx';
 import JadwalReplizPanel from './JadwalReplizPanel.jsx';
 import EditorVoicePanel from './EditorVoicePanel.jsx';
 import ViolationNoticeReader from './ViolationNoticeReader.jsx';
+import ViolationJenisPills from './ViolationJenisPills.jsx';
+import ViolationClampText from './ViolationClampText.jsx';
+import ViolationVideoAnalysis from './ViolationVideoAnalysis.jsx';
 import {
   NOTICE_FIELD_LABELS,
   NOTICE_FIELD_ORDER,
@@ -27,6 +30,8 @@ import {
   imageFileFromClipboard,
   sheetTanggal,
 } from './violationNotice.js';
+import { formatViolationDate, violationDateToIso, violationPenyebab } from './violationDisplay.js';
+import { applyVideoSuggestion } from './violationVideo.js';
 import AppBrand from './AppBrand.jsx';
 import InstallBanner from './InstallBanner.jsx';
 import MobileShell, { MobileBotButton } from './MobileShell.jsx';
@@ -80,7 +85,8 @@ const EMPTY_VIOLATION_FORM = {
   produk: '', 
   jenis: '', 
   status: 'Belum Banding',
-  catatan: '', 
+  catatan: '',
+  penyebab: '',
   tanggal: '',
   linkVideo: '', 
   screenshots: []
@@ -386,6 +392,7 @@ export default function App() {
   const [ssLabelInput, setSsLabelInput] = useState('SS Teguran');
   const [autoFilled, setAutoFilled] = useState({});
   const [noticeKey, setNoticeKey] = useState(0);
+  const [videoRun, setVideoRun] = useState(0);
   const violationFormRef = useRef(EMPTY_VIOLATION_FORM);
   const readNoticeRef = useRef(() => {});
   const noticeApplyRef = useRef(() => ({ labels: [] }));
@@ -1354,6 +1361,7 @@ export default function App() {
     setIsCustomJenis(false);
     commitViolation(EMPTY_VIOLATION_FORM);
     setAutoFilled({});
+    setVideoRun(0);
     setNoticeKey((value) => value + 1);
   };
 
@@ -1411,7 +1419,8 @@ export default function App() {
       jenis: item.jenis || '',
       status: item.status || 'Belum Banding',
       catatan: item.catatan === '-' ? '' : (item.catatan || ''),
-      tanggal: normalizeDateToIso(item.tanggal),
+      penyebab: violationPenyebab(item),
+      tanggal: violationDateToIso(item.tanggal),
       linkVideo: item.linkVideo || '',
       screenshots: getViolationScreenshots(item)
     });
@@ -1443,6 +1452,24 @@ export default function App() {
   useEffect(() => {
     noticeApplyRef.current = handleNoticeApply;
   });
+
+  const violationFileId = (item) => {
+    const direct = oneDriveFileId(item?.fileId, item?.Id_File);
+    if (direct) return direct;
+    return oneDriveFileId(matchOneDriveForTikTokPage(item?.linkVideo, publishVideos, data, klipVideos).fileId);
+  };
+
+  const handleVideoApply = (fields) => {
+    const applied = applyVideoSuggestion(violationFormRef.current, fields);
+    commitViolation(applied.form);
+    setAutoFilled((prev) => ({ ...prev, ...applied.filled }));
+    return applied;
+  };
+
+  const handleAnalyzeRow = (item) => {
+    handleStartEditViolation(item);
+    setVideoRun((value) => value + 1);
+  };
 
   const handleQuickStatusChange = async (id, newStatus) => {
     const targetItem = violations.find(v => v.id === id);
@@ -1483,6 +1510,7 @@ export default function App() {
         status: form.status || 'Belum Banding',
         linkVideo: form.linkVideo || '',
         screenshots: form.screenshots || [],
+        penyebab: String(form.penyebab || '').trim(),
         catatan: form.catatan || '-'
       };
 
@@ -1510,6 +1538,7 @@ export default function App() {
       status: form.status || 'Belum Banding',
       linkVideo: form.linkVideo || '',
       screenshots: form.screenshots || [],
+      penyebab: String(form.penyebab || '').trim(),
       catatan: form.catatan || '-'
     };
 
@@ -3226,12 +3255,13 @@ export default function App() {
             onAddShots={handleQuickAddScreenshotsToRow}
             onStatus={handleQuickStatusChange}
             onEdit={handleStartEditViolation}
+            onAnalyze={handleAnalyzeRow}
           />
           <div className="mb-6 hidden lg:block">
             <h2 className="text-2xl font-bold text-red-700 flex items-center gap-2">
               <ShieldAlert className="w-6 h-6" /> Evaluasi Video Pelanggaran
             </h2>
-            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, baca screenshot pemberitahuan, lalu periksa isian sebelum simpan.</p>
+            <p className="text-gray-500 mt-1">Catat teguran algoritma TikTok, baca screenshot, isi penyebab, lalu periksa sebelum simpan.</p>
           </div>
 
           <form
@@ -3388,7 +3418,7 @@ export default function App() {
                 />
               </label>
 
-              <label className="flex min-w-0 flex-col" htmlFor="pelanggaran-link">
+              <label className="flex min-w-0 flex-col sm:col-span-2" htmlFor="pelanggaran-link">
                 <span className="mb-1 text-[10px] font-bold text-slate-500">Tautan video, isi sendiri</span>
                 <input
                   id="pelanggaran-link"
@@ -3421,7 +3451,21 @@ export default function App() {
                 </label>
               </div>
 
-              <div className="flex min-w-0 flex-col sm:col-span-2">
+              <div className="flex min-w-0 flex-col md:col-span-4">
+                <span className="mb-1 text-[10px] font-bold text-slate-500">Penyebab</span>
+                <AutoFilledMark active={!!autoFilled.penyebab} id="auto-penyebab" />
+                <textarea
+                  aria-label="Penyebab pelanggaran"
+                  aria-describedby={autoFilled.penyebab ? 'auto-penyebab' : undefined}
+                  placeholder="Penyebab pelanggaran. Bisa terisi dari screenshot atau analisis video, lalu diperiksa sebelum simpan."
+                  value={newViolation.penyebab}
+                  onChange={(e) => patchViolation({ penyebab: e.target.value })}
+                  rows={2}
+                  className={violationInputClass(!!autoFilled.penyebab)}
+                />
+              </div>
+
+              <div className="flex min-w-0 flex-col sm:col-span-2 md:col-span-4">
                 <AutoFilledMark active={!!autoFilled.catatan} id="auto-catatan" />
                 <input
                   type="text"
@@ -3434,6 +3478,21 @@ export default function App() {
                 />
               </div>
             </div>
+
+            <ViolationVideoAnalysis
+              fileId={violationFileId(newViolation)}
+              hasLink={Boolean(String(newViolation.linkVideo || '').trim())}
+              context={{
+                produk: newViolation.produk,
+                jenis: newViolation.jenis,
+                penyebab: newViolation.penyebab,
+                catatan: newViolation.catatan,
+              }}
+              runToken={videoRun}
+              session={noticeKey}
+              onApply={handleVideoApply}
+              onConsumed={() => setVideoRun(0)}
+            />
 
             {newViolation.screenshots && newViolation.screenshots.length > 0 && (
               <div className="mb-4 p-3 bg-gray-50 rounded-xl border border-gray-200">
@@ -3482,79 +3541,104 @@ export default function App() {
 
           <div className="hidden lg:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm min-w-[950px]">
+              <table className="w-full min-w-[1040px] table-fixed border-collapse text-left text-sm">
+                <colgroup>
+                  <col className="w-[12%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[6%]" />
+                </colgroup>
                 <thead>
-                  <tr className="bg-red-50/60 text-red-900 border-b border-red-100 text-xs uppercase">
-                    <th className="py-3.5 px-4 font-bold">Tanggal & Akun</th>
-                    <th className="py-3.5 px-4 font-bold">Produk & Link Video</th>
-                    <th className="py-3.5 px-4 font-bold">Jenis Pelanggaran</th>
-                    <th className="py-3.5 px-4 font-bold text-center">Galeri Bukti SS (Multi)</th>
-                    <th className="py-3.5 px-4 font-bold">Status Banding</th>
-                    <th className="py-3.5 px-4 font-bold">Evaluasi / Tindakan</th>
-                    <th className="py-3.5 px-4 font-bold text-center print:hidden">Aksi</th>
+                  <tr className="bg-red-50/60 text-red-900 border-b border-red-100 text-[11px] uppercase tracking-wide">
+                    <th className="py-3 px-3 text-left font-bold">Tanggal & Akun</th>
+                    <th className="py-3 px-3 text-left font-bold">Produk & Link Video</th>
+                    <th className="py-3 px-3 text-left font-bold">Jenis Pelanggaran</th>
+                    <th className="py-3 px-3 text-left font-bold">Penyebab</th>
+                    <th className="py-3 px-3 text-left font-bold">Galeri Bukti</th>
+                    <th className="py-3 px-3 text-left font-bold">Status Banding</th>
+                    <th className="py-3 px-3 text-left font-bold">Evaluasi / Tindakan</th>
+                    <th className="py-3 px-2 text-left font-bold print:hidden">Aksi</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
+                  {violations.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-3 py-8 text-center text-sm font-semibold text-gray-400">Belum ada pelanggaran tercatat.</td>
+                    </tr>
+                  )}
                   {violations.map((v) => {
                     const rowScreenshots = getViolationScreenshots(v);
+                    const penyebab = violationPenyebab(v);
+                    const tanggal = formatViolationDate(v.tanggal);
                     return (
-                      <tr key={v.id} className={`hover:bg-gray-50 transition-colors ${editingViolationId === v.id ? 'bg-amber-50/40' : ''}`}>
-                        <td className="py-3.5 px-4">
-                          <p className="font-bold text-gray-900">{v.akun}</p>
-                          <span className="text-xs text-gray-500">{v.tanggal}</span>
+                      <tr key={v.id} className={`align-top hover:bg-gray-50 transition-colors ${editingViolationId === v.id ? 'bg-amber-50/40' : ''}`}>
+                        <td className="px-3 py-3 align-top">
+                          <p className="font-bold text-gray-900 break-words">{v.akun}</p>
+                          <span className="mt-1 block text-xs text-gray-500">{tanggal || 'Tanpa tanggal'}</span>
                         </td>
-                        <td className="py-3.5 px-4">
-                          <p className="font-bold text-gray-800">{v.produk}</p>
-                          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                        <td className="px-3 py-3 align-top">
+                          <p className="font-bold text-gray-800 break-words">{v.produk}</p>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             {canPlayTikTokUrl(v.linkVideo) && (
                               <button
                                 type="button"
                                 onClick={() => openTikTokPlayer(v.produk || 'Video pelanggaran', v.linkVideo, { produk: v.produk })}
-                                className="inline-flex items-center gap-1 text-xs font-bold text-white bg-gray-900 hover:bg-black px-2 py-1 rounded-md"
+                                className="inline-flex items-center gap-1 rounded-md bg-gray-900 px-2 py-1 text-xs font-bold text-white hover:bg-black"
                               >
-                                <Play className="w-3 h-3" fill="currentColor" /> Putar
+                                <Play className="h-3 w-3" fill="currentColor" /> Putar
                               </button>
                             )}
                             {v.linkVideo ? (
-                              <a href={v.linkVideo} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 w-max">
-                                Buka Video <ExternalLink className="w-3 h-3" />
+                              <a href={v.linkVideo} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline">
+                                Buka Video <ExternalLink className="h-3 w-3" />
                               </a>
                             ) : (
-                              <span className="text-xs text-gray-400 italic">Tanpa link</span>
+                              <span className="text-xs italic text-gray-400">Tanpa link</span>
                             )}
+                            <button
+                              type="button"
+                              onClick={() => handleAnalyzeRow(v)}
+                              className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-800 hover:bg-slate-50"
+                            >
+                              <Film className="h-3 w-3" aria-hidden="true" /> Analisis
+                            </button>
                           </div>
                         </td>
-                        <td className="py-3.5 px-4">
-                          <span className="px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 rounded-md text-xs font-bold">
-                            {v.jenis}
-                          </span>
+                        <td className="px-3 py-3 align-top">
+                          <ViolationJenisPills jenis={v.jenis} />
                         </td>
-
-                        <td className="py-3.5 px-4 text-center">
-                          <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-[220px] mx-auto">
+                        <td className="px-3 py-3 align-top">
+                          <ViolationClampText text={penyebab} className="text-gray-700" />
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <div className="flex flex-wrap items-center gap-1.5">
                             {rowScreenshots.map((ss, idx) => (
                               <button
                                 key={ss.id || idx}
+                                type="button"
                                 onClick={() => setPreviewGallery({ produk: v.produk, images: rowScreenshots, activeIndex: idx })}
-                                className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 hover:bg-red-50 text-gray-800 hover:text-red-700 rounded-md text-[11px] font-bold border border-gray-300 transition-colors"
+                                className="inline-flex max-w-full items-center gap-1 rounded-md border border-gray-300 bg-gray-100 px-2 py-1 text-[11px] font-bold text-gray-800 hover:bg-red-50 hover:text-red-700"
                               >
-                                <ImageIcon className="w-3 h-3 text-red-600 shrink-0" />
-                                <span className="truncate max-w-[95px]">{ss.label || `SS #${idx + 1}`}</span>
+                                <ImageIcon className="h-3 w-3 shrink-0 text-red-600" />
+                                <span className="truncate">{ss.label || `SS #${idx + 1}`}</span>
                               </button>
                             ))}
-
-                            <label className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-md text-[11px] font-bold border border-dashed border-emerald-300 cursor-pointer print:hidden">
-                              <Plus className="w-3 h-3 text-emerald-600" /> Tambah SS
+                            <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800 print:hidden">
+                              <Plus className="h-3 w-3 text-emerald-600" /> Tambah SS
                               <input type="file" accept="image/*" multiple onChange={(e) => handleQuickAddScreenshotsToRow(e, v.id)} className="hidden" />
                             </label>
                           </div>
                         </td>
-
-                        <td className="py-3.5 px-4">
+                        <td className="px-3 py-3 align-top">
                           <select
+                            aria-label={`Status banding ${v.produk || ''}`}
                             value={v.status || 'Belum Banding'}
                             onChange={(e) => handleQuickStatusChange(v.id, e.target.value)}
-                            className={`text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer focus:outline-none ${getViolationStatusStyle(v.status)}`}
+                            className={`w-full max-w-full cursor-pointer rounded-lg border px-1.5 py-1.5 text-[11px] font-bold focus:outline-none ${getViolationStatusStyle(v.status)}`}
                           >
                             <option value="Belum Banding">Belum Banding</option>
                             <option value="Menunggu Banding">Menunggu Banding</option>
@@ -3562,15 +3646,16 @@ export default function App() {
                             <option value="Banding Ditolak">Banding Ditolak</option>
                           </select>
                         </td>
-
-                        <td className="py-3.5 px-4 text-gray-600 text-xs leading-relaxed max-w-xs">{v.catatan}</td>
-
-                        <td className="py-3.5 px-4 text-center print:hidden">
+                        <td className="px-3 py-3 align-top">
+                          <ViolationClampText text={v.catatan} empty="-" className="text-gray-600" />
+                        </td>
+                        <td className="px-2 py-3 align-top print:hidden">
                           <button
+                            type="button"
                             onClick={() => handleStartEditViolation(v)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
+                            className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-100"
                           >
-                            <Edit3 className="w-3.5 h-3.5" /> Edit
+                            <Edit3 className="h-3.5 w-3.5" /> Edit
                           </button>
                         </td>
                       </tr>
