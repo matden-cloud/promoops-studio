@@ -5,7 +5,7 @@ import {
   Filter, Zap, Flame, Rocket, ChevronLeft, ChevronRight, PlayCircle, 
   X, AlertTriangle, CheckCircle2, ServerCrash, BrainCircuit,
   ShieldAlert, Star, Plus, Image as ImageIcon, FolderOpen, Send, Printer, Trash2, Check, Calendar, Activity, ChevronUp, ChevronDown,
-  Play, Smartphone, Package, CalendarClock, Mic, Film
+  Play, Smartphone, Package, CalendarClock, Mic, Film, Download
 } from 'lucide-react';
 import { UploadTargetButton } from './UploadTargetControl.jsx';
 import {
@@ -95,6 +95,9 @@ import {
   rekapMonthChoices,
   rowYearMonth,
 } from './rekapProduk.js';
+import AiMarkdown from './AiMarkdown.jsx';
+import { buildDashboardAiPack } from './productLookup.js';
+import { buildInsightPrompt, buildMonthlyReport, bulletsFromText, localInsightBullets } from './reportData.js';
 
 const DEFAULT_VIOLATION_TYPES = [
   "Produk Berbahaya / Tajam",
@@ -469,6 +472,9 @@ export default function App() {
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiResponse, setAiResponse] = useState('');
   const [isAiThinking, setIsAiThinking] = useState(false);
+  const [reportBusy, setReportBusy] = useState('');
+  const [reportNote, setReportNote] = useState('');
+  const aiInputRef = useRef(null);
 
   // --- STATE HALAMAN PELANGGARAN ---
   const [violations, setViolations] = useState([]);
@@ -1726,64 +1732,126 @@ export default function App() {
 
     setIsAiThinking(true);
     setAiResponse('');
-
-    const monthlyPowerSummary = monthlyPowerCards.map(m => 
-      `${m.title}: Mentahan=${m.mentahan} (${m.powerRawPerHari}/hr, Est:${m.estRawBulanan}), Produksi=${m.produksi} (${m.powerKlipPerHari}/hr, Est:${m.estKlipBulanan}), Publish=${m.publish} (${m.powerPubPerHari}/hr, Power:${m.powerPercentage}%)`
-    ).join(' | ');
-    const topProdsText = aggregatedProducts.slice(0, 8).map(p => `${p.produk} (Raw:${p.mentahan}, Edit:${p.videoFinal}, Upload:${p.upload}, Bagus:${p.isWinning ? 'Ya' : 'Tidak'}, FileBerbintang:${p.starredFilesCount})`).join('; ');
-
-    const dashboardContext = `
-      Konteks Data Asli Web PromoOps Studio Saat Ini:
-      - Filter Aktif: Bulan ${rekapBulan}, Tanggal ${rekapTanggal || 'Semua Hari'}, Produk ${rekapProduk}, Tim/Akun ${rekapTim}.
-      - Rekap Power Kekuatan Seluruh Bulan: ${monthlyPowerSummary}.
-      - Total Mentahan Terfilter: ${totalMentahanRekap} file (${totalBelumDipakaiRekap} belum dipakai, ${totalDipakaiRekap} sudah dipakai).
-      - Total Video Final Terfilter: ${totalFinalRekap} klip.
-      - Total Upload Terfilter: ${totalUploadRekap} video tayang (${uploadPlan.caption}).
-      - 8 Produk Teratas: ${topProdsText}.
-      - Total Pelanggaran Tercatat: ${violations.length} kasus.
-    `;
-
-    const fullPrompt = `
-      Anda adalah Asisten Eksekutif Divisi Video PromoOps Studio.
-      Berikut adalah data langsung yang sedang tampil di layar web pengguna:
-      ${dashboardContext}
-
-      Pertanyaan / Instruksi Pengguna: "${queryText}"
-
-      Berikan jawaban yang terstruktur, tajam, dan siap pakai untuk laporan manajemen atau slide PPT. Gunakan bahasa Indonesia yang profesional.
-    `;
+    const pack = buildDashboardAiPack({
+      question: queryText,
+      now: new Date(),
+      filters: {
+        month: rekapBulan,
+        date: rekapTanggal,
+        produk: rekapProduk,
+        tim: rekapTim,
+        query: debouncedPipelineQuery,
+        onlyWinning,
+        accounts: masterAccounts,
+      },
+      accounts: masterAccounts,
+      accountLookup,
+      rawAssets,
+      klipVideos,
+      publishVideos,
+      viewRows: data,
+      aggregatedProducts,
+      monthly: monthlyPowerCards.map((month) => ({
+        month: month.month,
+        label: month.title,
+        mentahan: month.mentahan,
+        produksi: month.produksi,
+        publish: month.publish,
+      })),
+      totals: {
+        mentahan: totalMentahanRekap,
+        belum: totalBelumDipakaiRekap,
+        dipakai: totalDipakaiRekap,
+        klip: totalFinalRekap,
+        upload: totalUploadRekap,
+      },
+      violations: violations.length,
+      uploadPlan,
+    });
 
     try {
-      const { response, result } = await requestGemini(fullPrompt, { temperature: 0.7, maxOutputTokens: 2048 });
-      if (response.status === 503) {
-        setTimeout(() => {
-          setAiResponse(
-            `**RINGKASAN EKSEKUTIF & POWER BULANAN PROMOOPS STUDIO**\n\n` +
-            `**1. Power Kekuatan per Bulan (Mentahan, Produksi, Publish)**\n` +
-            monthlyPowerCards.map(m => `* **${m.title}:** Mentahan **${m.mentahan}** (${m.powerRawPerHari}/hr) • Produksi **${m.produksi}** (${m.powerKlipPerHari}/hr) • Publish **${m.publish}** (${m.powerPubPerHari}/hr — Power Target **${m.powerPercentage}%**)`).join('\n') +
-            `\n\n**2. Peringkat Produk Terbanyak**\n` +
-            `* Produk tertinggi dipimpin oleh **${aggregatedProducts[0]?.produk || '-'}** (${aggregatedProducts[0]?.mentahan || 0} mentahan, ${aggregatedProducts[0]?.videoFinal || 0} edit, ${aggregatedProducts[0]?.upload || 0} upload).\n` +
-            `* Produk yang ditandai Bagus (⭐): **${aggregatedProducts.filter(p => p.isWinning || p.starredFilesCount > 0).map(p => `${p.produk} (${p.starredFilesCount} file berbintang)`).join(', ') || 'Belum ada'}**.`
-          );
-          setIsAiThinking(false);
-        }, 600);
-        return;
-      }
-
-      if (result?.text) {
-        setAiResponse(result.text);
-      } else {
-        setAiResponse(
-          `**RINGKASAN EKSEKUTIF LAPORAN PROMOOPS STUDIO (${rekapBulan})**\n\n` +
-          `* **Total Mentahan:** ${totalMentahanRekap} file (${totalBelumDipakaiRekap} siap pakai).\n` +
-          `* **Total Produksi (Video Final):** ${totalFinalRekap} video selesai diedit.\n` +
-          `* **Total Upload (Sheet Publish):** ${totalUploadRekap} video tayang.`
-        );
-      }
+      const { response, result } = await requestGemini(pack.prompt, { temperature: 0.4, maxOutputTokens: 2048 });
+      if (response.ok && result?.text) setAiResponse(result.text);
+      else setAiResponse(pack.fallback);
     } catch {
-      setAiResponse("Gagal menghubungi server AI, namun Anda tetap dapat mencetak halaman ini ke PDF.");
+      setAiResponse(pack.fallback);
     }
     setIsAiThinking(false);
+  };
+
+  const insightsForReport = async (report) => {
+    try {
+      const { response, result } = await requestGemini(buildInsightPrompt(report), { temperature: 0.4, maxOutputTokens: 800 });
+      if (response.ok && result?.text) {
+        const bullets = bulletsFromText(result.text);
+        if (bullets.length) return bullets;
+      }
+    } catch {
+      // Pakai ringkasan lokal bila Gemini tidak menjawab.
+    }
+    return localInsightBullets(report);
+  };
+
+  const exportMonthlyReport = async (kind) => {
+    if (reportBusy) return;
+    setReportBusy(kind);
+    setReportNote('');
+    try {
+      const month = toYearMonth(rekapBulan) || currentYearMonth();
+      const timLabel = rekapTim === 'Semua'
+        ? 'Semua tim & akun'
+        : (accountLookup[String(rekapTim).toUpperCase()] || rekapTim);
+      const report = buildMonthlyReport({
+        now: new Date(),
+        month,
+        timLabel,
+        filters: {
+          date: rekapTanggal,
+          produk: rekapProduk,
+          tim: rekapTim,
+          query: debouncedPipelineQuery,
+        },
+        accounts: masterAccounts,
+        targets: uploadTargets,
+        accountLookup,
+        rawAssets,
+        klipVideos,
+        publishVideos,
+        viewRows: data,
+        monthlySeries: monthlyPowerCards.map((item) => ({
+          month: item.month,
+          label: item.title,
+          mentahan: item.mentahan,
+          produksi: item.produksi,
+          publish: item.publish,
+        })),
+      });
+      const insights = await insightsForReport(report);
+      const exporter = await import('./reportExport.js');
+      if (kind === 'ppt') await exporter.downloadMonthlyPpt(report, insights);
+      else await exporter.downloadMonthlyPdf(report, insights);
+    } catch (error) {
+      console.error(error);
+      setReportNote('Gagal membuat berkas laporan. Coba lagi.');
+    } finally {
+      setReportBusy('');
+    }
+  };
+
+  const exportAiAnswer = async (kind) => {
+    if (reportBusy || !aiResponse) return;
+    setReportBusy(kind);
+    setReportNote('');
+    try {
+      const exporter = await import('./reportExport.js');
+      if (kind === 'answer-ppt') await exporter.downloadAnswerPpt('Jawaban Asisten AI', aiResponse);
+      else await exporter.downloadAnswerPdf('Jawaban Asisten AI', aiResponse);
+    } catch (error) {
+      console.error(error);
+      setReportNote('Gagal mengunduh jawaban. Coba lagi.');
+    } finally {
+      setReportBusy('');
+    }
   };
 
   const analyzeWithGemini = async (row) => {
@@ -2159,7 +2227,40 @@ export default function App() {
                 >
                   ⭐ Rekomendasi Fokus Produk
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAiQuestion('Cari data produk ');
+                    aiInputRef.current?.focus();
+                  }}
+                  className="text-xs bg-white hover:bg-amber-50 text-amber-800 border border-amber-200 font-bold px-3 py-2 rounded-xl shadow-sm transition-colors"
+                >
+                  Cari data produk…
+                </button>
               </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-gray-500">Laporan Bulan Ini</span>
+                <button
+                  type="button"
+                  onClick={() => exportMonthlyReport('ppt')}
+                  disabled={!!reportBusy}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-60"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {reportBusy === 'ppt' ? 'Menyusun PPT…' : 'Unduh PPT'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportMonthlyReport('pdf')}
+                  disabled={!!reportBusy}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-xs font-bold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:opacity-60"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  {reportBusy === 'pdf' ? 'Menyusun PDF…' : 'Unduh PDF'}
+                </button>
+              </div>
+              {reportNote && <p className="text-xs font-semibold text-red-600">{reportNote}</p>}
 
               <div className="bg-white p-4 rounded-xl border border-gray-200 min-h-[220px] text-sm">
                 {isAiThinking ? (
@@ -2168,23 +2269,38 @@ export default function App() {
                     <p className="font-bold text-gray-800">Sedang membaca data tabel & menyusun laporan...</p>
                   </div>
                 ) : aiResponse ? (
-                  <div className="space-y-2 leading-relaxed text-gray-700">
-                    {aiResponse.split('\n').map((line, i) => (
-                      <p key={i} className={line.startsWith('**') ? 'font-bold text-gray-900 mt-2' : ''}>
-                        {line.replace(/\*\*/g, '')}
-                      </p>
-                    ))}
-                  </div>
+                  <AiMarkdown text={aiResponse} />
                 ) : (
                   <div className="text-gray-400 text-center py-12">
                     Klik salah satu tombol cepat di atas atau ketik pertanyaan Anda di bawah untuk meminta AI merangkum isi web ini.
                   </div>
                 )}
               </div>
+              {aiResponse && !isAiThinking && (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportAiAnswer('answer-ppt')}
+                    disabled={!!reportBusy}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {reportBusy === 'answer-ppt' ? 'Menyusun PPT…' : 'Unduh jawaban PPT'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportAiAnswer('answer-pdf')}
+                    disabled={!!reportBusy}
+                    className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {reportBusy === 'answer-pdf' ? 'Menyusun PDF…' : 'Unduh jawaban PDF'}
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="p-4 bg-white border-t border-gray-200 flex gap-2 shrink-0">
               <input 
+                ref={aiInputRef}
                 type="text" 
                 value={aiQuestion}
                 onChange={(e) => setAiQuestion(e.target.value)}
@@ -2463,8 +2579,27 @@ export default function App() {
                 <Star className={`w-4 h-4 ${onlyWinning ? 'fill-amber-500 text-amber-500' : 'text-gray-400'}`} />
                 {onlyWinning ? 'Menampilkan Mentahan Bagus ⭐' : 'Filter Mentahan Bagus'}
               </button>
+              <button
+                type="button"
+                onClick={() => exportMonthlyReport('ppt')}
+                disabled={!!reportBusy}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-700 px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-emerald-800 disabled:opacity-60 md:text-sm"
+              >
+                <Download className="h-4 w-4" />
+                {reportBusy === 'ppt' ? 'Menyusun PPT…' : 'Unduh PPT'}
+              </button>
+              <button
+                type="button"
+                onClick={() => exportMonthlyReport('pdf')}
+                disabled={!!reportBusy}
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-xs font-bold text-emerald-800 shadow-sm hover:bg-emerald-50 disabled:opacity-60 md:text-sm"
+              >
+                <Download className="h-4 w-4" />
+                {reportBusy === 'pdf' ? 'Menyusun PDF…' : 'Unduh PDF'}
+              </button>
             </div>
           </div>
+          {reportNote && <p className="mb-4 text-sm font-semibold text-red-600">{reportNote}</p>}
 
           <div className="mb-6 print:hidden">
             <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
