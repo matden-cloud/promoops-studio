@@ -14,6 +14,7 @@ import {
   isMentahanFile,
   mentahanStatusAction,
   rawFileMeta,
+  rawStatusSaveError,
   withListedFileStatus,
   withRawStatus,
 } from './rawFileStatus.js';
@@ -282,33 +283,31 @@ function fileLinkHp(row) {
   return safeHttpUrl(row?.linkHp || row?.Link_HP || row?.link_hp || '');
 }
 
-function MentahanStatusControl({ file, usage, busy, error, onChange }) {
+function MentahanStatusControl({ file, busy, error, onChange }) {
   if (!isMentahanFile(file)) return null;
-  const action = mentahanStatusAction(file, usage);
+  const action = mentahanStatusAction(file);
+  const labelClass = action.tone === 'belum'
+    ? 'bg-amber-50 text-amber-700 border-amber-200'
+    : 'bg-emerald-50 text-emerald-700 border-emerald-200';
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      {action.canMarkUsed && (
+    <div className="mt-1">
+      <span className={`inline-flex text-[11px] font-bold px-2 py-0.5 rounded border ${labelClass}`}>
+        {action.label}
+      </span>
+      {action.button && (
         <button
           type="button"
           disabled={busy}
-          onClick={() => onChange(file, 'Sudah Dipakai')}
-          className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 disabled:opacity-60"
+          onClick={() => onChange(file, action.nextStatus)}
+          className="mt-1 block rounded-md border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60"
         >
-          {busy ? 'Menyimpan...' : 'Sudah Dipakai'}
+          {busy ? 'Menyimpan...' : action.button}
         </button>
       )}
-      {action.canRevert && (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onChange(file, 'Belum Dipakai')}
-          className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:opacity-60"
-        >
-          {busy ? 'Menyimpan...' : 'Belum Dipakai'}
-        </button>
+      {action.fromKlip && !action.button && (
+        <p className="mt-0.5 text-[10px] font-medium text-gray-400">dari Klip</p>
       )}
-      <span className="text-[10px] font-medium leading-snug text-gray-500">{action.hint}</span>
-      {error && <span role="alert" className="text-[10px] font-semibold text-red-600">{error}</span>}
+      {error && <p role="alert" className="mt-0.5 text-[10px] font-semibold text-red-600">{error}</p>}
     </div>
   );
 }
@@ -1246,7 +1245,7 @@ export default function App() {
     if (!saved.ok) {
       setRawAssets(previousRows);
       setDrillDownModal((modal) => (modal ? { ...modal, items: previousItems || modal.items } : modal));
-      setRawStatusError({ fileKey: file.fileKey, message: saved.message || 'Gagal menyimpan status file.' });
+      setRawStatusError({ fileKey: file.fileKey, message: rawStatusSaveError(saved.message) });
     }
   };
 
@@ -2048,16 +2047,19 @@ export default function App() {
 
                           <div className="flex flex-wrap items-center gap-2 mt-1">
                             <span className="text-xs text-gray-500 font-medium">{file.owner}</span>
-                            <span className="text-gray-300">•</span>
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${
-                              String(file.status).includes('Belum') ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                            }`}>
-                              {file.status}
-                            </span>
+                            {!isMentahanFile(file) && (
+                              <>
+                                <span className="text-gray-300">•</span>
+                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                                  String(file.status).includes('Belum') ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                }`}>
+                                  {file.status}
+                                </span>
+                              </>
+                            )}
                           </div>
                           <MentahanStatusControl
                             file={file}
-                            usage={klipRawUsage}
                             busy={rawStatusBusyKey === file.fileKey}
                             error={rawStatusError?.fileKey === file.fileKey ? rawStatusError.message : ''}
                             onChange={updateRawFileStatus}

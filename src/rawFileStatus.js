@@ -99,24 +99,52 @@ export function withListedFileStatus(items, file, status) {
   ));
 }
 
-const REVERT_HINT = 'Kembali ke Belum Dipakai hanya bertahan untuk file yang tidak tercantum di Klip_Vidio_RAW.';
-const KLIP_HINT = 'Status mengikuti Klip_Vidio_RAW. Tombol Belum Dipakai tidak mengubah file yang sudah masuk klip.';
-
-export function mentahanStatusAction(file, usage) {
-  const status = text(file?.status);
-  const lower = status.toLowerCase();
-  const belum = lower.includes('belum');
-  const dipakai = !belum && lower.includes('pakai');
+export function mentahanStatusAction(file) {
+  const lower = text(file?.status).toLowerCase();
+  const dipakai = !lower.includes('belum') && lower.includes('pakai');
   const manual = explicitManualStatus(file);
-  const detectable = Boolean(usage?.detectable) || manual !== null || file?.inKlip === true;
-  const inKlip = file?.inKlip === true || manual === false;
+  const fromKlip = Boolean(file?.inKlip) || manual === false;
 
-  if (dipakai && inKlip) {
-    return { canMarkUsed: false, canRevert: false, hint: KLIP_HINT, locked: true };
-  }
   if (!dipakai) {
-    return { canMarkUsed: true, canRevert: false, hint: REVERT_HINT, locked: false };
+    return {
+      label: 'Belum Dipakai',
+      tone: 'belum',
+      button: 'Tandai Sudah Dipakai',
+      nextStatus: 'Sudah Dipakai',
+      fromKlip: false,
+    };
   }
-  const canRevert = manual === true || (detectable && !inKlip) || !detectable;
-  return { canMarkUsed: false, canRevert, hint: REVERT_HINT, locked: !canRevert };
+  if (fromKlip) {
+    return {
+      label: 'Sudah Dipakai',
+      tone: 'dipakai',
+      button: '',
+      nextStatus: '',
+      fromKlip: true,
+    };
+  }
+  if (manual === true) {
+    return {
+      label: 'Sudah Dipakai',
+      tone: 'dipakai',
+      button: 'Tandai Belum Dipakai',
+      nextStatus: 'Belum Dipakai',
+      fromKlip: false,
+    };
+  }
+  return {
+    label: 'Sudah Dipakai',
+    tone: 'dipakai',
+    button: '',
+    nextStatus: '',
+    fromKlip: false,
+  };
+}
+
+export function rawStatusSaveError(message) {
+  const value = text(message);
+  if (/a(?:ction|ksi)\s+tidak\s+dikenal/i.test(value)) {
+    return 'Apps Script belum di-deploy versi baru';
+  }
+  return value || 'Gagal menyimpan status.';
 }
