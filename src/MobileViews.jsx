@@ -17,6 +17,7 @@ import ViolationJenisPills from './ViolationJenisPills.jsx';
 import ViolationClampText from './ViolationClampText.jsx';
 import { formatViolationDate, violationPenyebab, violationSanksi } from './violationDisplay.js';
 import ViolationFilters from './ViolationFilters.jsx';
+import { shortViolationAkun } from './violationFilters.js';
 import {
   VIEW_BUCKETS,
   buildRekapProduk,
@@ -469,7 +470,7 @@ export function MobileViolations({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
               <p className="text-sm font-extrabold leading-snug">{item.produk || 'Tanpa produk'}</p>
-              <p className="mt-0.5 text-sm font-extrabold leading-snug">{item.akun || 'Tanpa akun'}</p>
+              <p className="mt-0.5 text-sm font-extrabold leading-snug">{shortViolationAkun(item.akun) || 'Tanpa akun'}</p>
               <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{formatViolationDate(item.tanggal) || 'Tanpa tanggal'}</p>
             </div>
             <select

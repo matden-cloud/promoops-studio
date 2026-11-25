@@ -36,6 +36,7 @@ import {
   EMPTY_VIOLATION_FILTERS,
   buildViolationFilterView,
   readViolationFilters,
+  shortViolationAkun,
   writeViolationFilters,
 } from './violationFilters.js';
 import ViolationFilters from './ViolationFilters.jsx';
@@ -3703,7 +3704,7 @@ export default function App() {
                     return (
                       <tr key={v.id} className={`align-top hover:bg-gray-50 transition-colors ${sameViolationId(editingViolationId, v.id) ? 'bg-amber-50/40' : ''}`}>
                         <td className="px-3 py-3 align-top">
-                          <p className="font-bold text-gray-900 break-words">{v.akun}</p>
+                          <p className="font-bold text-gray-900 break-words">{shortViolationAkun(v.akun) || 'Tanpa akun'}</p>
                           <span className="mt-1 block text-xs text-gray-500">{tanggal || 'Tanpa tanggal'}</span>
                         </td>
                         <td className="px-3 py-3 align-top">
@@ -3820,7 +3821,7 @@ export default function App() {
                 <dl className="mt-3 space-y-1.5 text-sm">
                   <div className="flex gap-2">
                     <dt className="w-16 shrink-0 font-bold text-gray-500">Akun</dt>
-                    <dd className="font-semibold text-gray-900">{pendingDelete.akun || 'Tanpa akun'}</dd>
+                    <dd className="font-semibold text-gray-900">{shortViolationAkun(pendingDelete.akun) || 'Tanpa akun'}</dd>
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-16 shrink-0 font-bold text-gray-500">Produk</dt>

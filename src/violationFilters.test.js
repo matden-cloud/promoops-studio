@@ -6,6 +6,7 @@ import {
   buildViolationFilterView,
   currentViolationMonth,
   readViolationFilters,
+  shortViolationAkun,
   violationMonthKey,
   violationMonthLabel,
   writeViolationFilters,
@@ -55,8 +56,8 @@ describe('filter bulan dan hitungan pelanggaran', () => {
     assert.equal(open.headline, 'Semua bulan: 5 pelanggaran');
     assert.equal(open.rangeLabel, 'Menampilkan 5 dari 5');
     assert.deepEqual(open.accountChips.map((item) => item.label), [
-      'AKN_002 - Produk Andalan Kita (3)',
-      'AKN_001 - Jual Kawat (Deni) (2)',
+      'Produk Andalan Kita (3)',
+      'Jual Kawat (2)',
     ]);
 
     const november = buildViolationFilterView(ROWS, { ...EMPTY_VIOLATION_FILTERS, bulan: '2026-11' }, NOW);
@@ -64,8 +65,8 @@ describe('filter bulan dan hitungan pelanggaran', () => {
     assert.equal(november.rangeLabel, 'Menampilkan 3 dari 5');
     assert.deepEqual(november.accounts.map((item) => item.label), [
       'Semua akun (3)',
-      'AKN_001 - Jual Kawat (Deni) (1)',
-      'AKN_002 - Produk Andalan Kita (2)',
+      'Jual Kawat (1)',
+      'Produk Andalan Kita (2)',
     ]);
     assert.deepEqual(november.months.map((item) => item.label), open.months.map((item) => item.label));
     assert.deepEqual(november.statuses.map((item) => item.label), [
@@ -83,8 +84,8 @@ describe('filter bulan dan hitungan pelanggaran', () => {
     assert.equal(narrowed.rows.length, 2);
     assert.deepEqual(narrowed.accounts.map((item) => item.label), [
       'Semua akun (2)',
-      'AKN_001 - Jual Kawat (Deni) (1)',
-      'AKN_002 - Produk Andalan Kita (1)',
+      'Jual Kawat (1)',
+      'Produk Andalan Kita (1)',
     ]);
     assert.deepEqual(narrowed.sanctions.map((item) => item.label), [
       'Semua sanksi (2)',
@@ -98,12 +99,35 @@ describe('filter bulan dan hitungan pelanggaran', () => {
     assert.equal(october.sanctions.find((item) => item.value === TANPA_SANKSI)?.label, 'Tanpa sanksi (1)');
   });
 
+  test('nama akun ditampilkan pendek dan digabung untuk hitungan', () => {
+    assert.equal(shortViolationAkun('AKN_002 - Produk Andalan Kita (Rizal)'), 'Produk Andalan Kita');
+    assert.equal(shortViolationAkun('Akun 1 - Produk Andalan Kita (Deni Rohmat)'), 'Produk Andalan Kita');
+    assert.equal(shortViolationAkun('AKN_001 - Jual Kawat (Deni)'), 'Jual Kawat');
+    assert.equal(shortViolationAkun('Toko Tanpa Kode'), 'Toko Tanpa Kode');
+    assert.equal(shortViolationAkun(''), '');
+
+    const grouped = buildViolationFilterView([
+      { tanggal: '20/11/2026', akun: 'AKN_002 - Produk Andalan Kita (Rizal)', status: 'Belum Banding', sanksi: 'Peringatan' },
+      { tanggal: '02/11/2026', akun: 'Akun 1 - Produk Andalan Kita (Deni Rohmat)', status: 'Menunggu Banding', sanksi: 'Peringatan' },
+      { tanggal: '2026-11-02', akun: 'AKN_001 - Jual Kawat (Deni)', status: 'Belum Banding', sanksi: 'Peringatan' },
+    ], { ...EMPTY_VIOLATION_FILTERS, akun: 'Produk Andalan Kita' }, NOW);
+    assert.equal(grouped.rows.length, 2);
+    assert.deepEqual(grouped.rows.map((row) => row.akun), [
+      'AKN_002 - Produk Andalan Kita (Rizal)',
+      'Akun 1 - Produk Andalan Kita (Deni Rohmat)',
+    ]);
+    assert.deepEqual(grouped.accountChips.map((item) => item.label), [
+      'Produk Andalan Kita (2)',
+      'Jual Kawat (1)',
+    ]);
+  });
+
   test('filter terakhir tersimpan dan JSON rusak diabaikan', () => {
     const storage = memoryStorage();
-    writeViolationFilters(storage, { bulan: '2026-11', akun: 'AKN_002 - Produk Andalan Kita', status: 'Semua', sanksi: 'Peringatan' });
+    writeViolationFilters(storage, { bulan: '2026-11', akun: 'AKN_002 - Produk Andalan Kita (Rizal)', status: 'Semua', sanksi: 'Peringatan' });
     assert.deepEqual(readViolationFilters(storage), {
       bulan: '2026-11',
-      akun: 'AKN_002 - Produk Andalan Kita',
+      akun: 'Produk Andalan Kita',
       status: 'Semua',
       sanksi: 'Peringatan',
     });

@@ -53,8 +53,16 @@ export function currentViolationMonth(now = new Date()) {
   return match ? `${match[1]}-${match[2]}` : '';
 }
 
+export function shortViolationAkun(value) {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!text || text === '-' || text.toLowerCase() === 'null') return '';
+  const withoutCode = text.replace(/^(?:AKN[_-]?\d+|Akun\s+\d+)\s*[-–—]\s+/i, '');
+  const withoutHolder = withoutCode.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  return withoutHolder || text;
+}
+
 export function violationAkunLabel(row) {
-  return cleanLabel(row?.akun, 'Tanpa akun');
+  return shortViolationAkun(row?.akun) || 'Tanpa akun';
 }
 
 export function violationStatusLabel(row) {
@@ -79,7 +87,7 @@ export function normalizeViolationFilters(value) {
   const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
   return {
     bulan: filterValue(source.bulan),
-    akun: filterValue(source.akun),
+    akun: filterValue(shortViolationAkun(source.akun)),
     status: filterValue(source.status),
     sanksi: filterValue(source.sanksi),
   };
