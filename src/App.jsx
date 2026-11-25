@@ -33,6 +33,7 @@ import {
 import { formatViolationDate, violationDateToIso, violationPenyebab } from './violationDisplay.js';
 import { applyVideoSuggestion } from './violationVideo.js';
 import AppBrand from './AppBrand.jsx';
+import InstallBanner from './InstallBanner.jsx';
 import MobileShell, { MobileBotButton } from './MobileShell.jsx';
 import { MobileFyp, MobilePipeline, MobileProduk, MobileViolations } from './MobileViews.jsx';
 import { CompareButton, CompareModal, CompareTray, DashboardPlayerModal } from './VideoPlayers.jsx';
@@ -1789,7 +1790,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#f3f5f4] font-sans text-gray-900 relative print:bg-white print:pb-0 pb-[calc(8.75rem+env(safe-area-inset-bottom))] lg:bg-gray-50 lg:pb-12 max-lg:font-[Plus_Jakarta_Sans,Inter,ui-sans-serif,system-ui,sans-serif]">
-      
+      <InstallBanner />
+
       {/* ========================================================================= */}
       {/* MODAL 1: POP-UP DRILL-DOWN DAFTAR FILE (BISA TANDAI BINTANG PER FILE)     */}
       {/* ========================================================================= */}
