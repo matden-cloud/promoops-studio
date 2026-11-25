@@ -32,6 +32,14 @@ import {
   withViolationFields,
 } from './violationNotice.js';
 import { formatViolationDate, violationDateToIso, violationPenyebab, violationSanksi } from './violationDisplay.js';
+import {
+  EMPTY_VIOLATION_FILTERS,
+  buildViolationFilterView,
+  readViolationFilters,
+  shortViolationAkun,
+  writeViolationFilters,
+} from './violationFilters.js';
+import ViolationFilters from './ViolationFilters.jsx';
 import { applyVideoSuggestion } from './violationVideo.js';
 import AppBrand from './AppBrand.jsx';
 import InstallBanner from './InstallBanner.jsx';
@@ -422,6 +430,28 @@ export default function App() {
   useEffect(() => {
     violationsRef.current = violations;
   }, [violations]);
+  const [violationFilters, setViolationFilters] = useState(() => {
+    try {
+      return readViolationFilters(globalThis.localStorage);
+    } catch {
+      return { ...EMPTY_VIOLATION_FILTERS };
+    }
+  });
+  const violationFilterView = useMemo(
+    () => buildViolationFilterView(violations, violationFilters),
+    [violations, violationFilters],
+  );
+  const changeViolationFilter = (key, value) => {
+    setViolationFilters((prev) => {
+      const next = { ...prev, [key]: value };
+      writeViolationFilters(globalThis.localStorage, next);
+      return next;
+    });
+  };
+  const resetViolationFilters = () => {
+    setViolationFilters({ ...EMPTY_VIOLATION_FILTERS });
+    writeViolationFilters(globalThis.localStorage, EMPTY_VIOLATION_FILTERS);
+  };
   const [newViolation, setNewViolation] = useState(EMPTY_VIOLATION_FORM);
   const [editingViolationId, setEditingViolationId] = useState(null);
   const [violationTypes, setViolationTypes] = useState(DEFAULT_VIOLATION_TYPES);
@@ -3282,7 +3312,11 @@ export default function App() {
       {activeMenu === 'pelanggaran' && (
         <div className="p-4 md:p-8 max-w-[1400px] mx-auto animate-in fade-in duration-300">
           <MobileViolations
-            items={violations.map((item) => ({ ...item, shots: getViolationScreenshots(item) }))}
+            items={violationFilterView.rows.map((item) => ({ ...item, shots: getViolationScreenshots(item) }))}
+            total={violations.length}
+            filterView={violationFilterView}
+            onFilter={changeViolationFilter}
+            onResetFilters={resetViolationFilters}
             formOpen={mobileViolationForm || editingViolationId !== null}
             onCreate={() => {
               resetViolationForm();
@@ -3622,6 +3656,13 @@ export default function App() {
             </div>
           </form>
 
+          <div id="filter-pelanggaran-desktop" className="mb-3 hidden lg:block">
+            <ViolationFilters
+              view={violationFilterView}
+              onChange={changeViolationFilter}
+              onReset={resetViolationFilters}
+            />
+          </div>
           <div className="hidden lg:block bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1120px] table-fixed border-collapse text-left text-sm">
@@ -3648,12 +3689,14 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {violations.length === 0 && (
+                  {violationFilterView.rows.length === 0 && (
                     <tr>
-                      <td colSpan={8} className="px-3 py-8 text-center text-sm font-semibold text-gray-400">Belum ada pelanggaran tercatat.</td>
+                      <td colSpan={8} className="px-3 py-8 text-center text-sm font-semibold text-gray-400">
+                        {violations.length > 0 ? 'Tidak ada pelanggaran untuk filter ini.' : 'Belum ada pelanggaran tercatat.'}
+                      </td>
                     </tr>
                   )}
-                  {violations.map((v) => {
+                  {violationFilterView.rows.map((v) => {
                     const rowScreenshots = getViolationScreenshots(v);
                     const penyebab = violationPenyebab(v);
                     const sanksi = violationSanksi(v);
@@ -3661,7 +3704,7 @@ export default function App() {
                     return (
                       <tr key={v.id} className={`align-top hover:bg-gray-50 transition-colors ${sameViolationId(editingViolationId, v.id) ? 'bg-amber-50/40' : ''}`}>
                         <td className="px-3 py-3 align-top">
-                          <p className="font-bold text-gray-900 break-words">{v.akun}</p>
+                          <p className="font-bold text-gray-900 break-words">{shortViolationAkun(v.akun) || 'Tanpa akun'}</p>
                           <span className="mt-1 block text-xs text-gray-500">{tanggal || 'Tanpa tanggal'}</span>
                         </td>
                         <td className="px-3 py-3 align-top">
@@ -3778,7 +3821,7 @@ export default function App() {
                 <dl className="mt-3 space-y-1.5 text-sm">
                   <div className="flex gap-2">
                     <dt className="w-16 shrink-0 font-bold text-gray-500">Akun</dt>
-                    <dd className="font-semibold text-gray-900">{pendingDelete.akun || 'Tanpa akun'}</dd>
+                    <dd className="font-semibold text-gray-900">{shortViolationAkun(pendingDelete.akun) || 'Tanpa akun'}</dd>
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-16 shrink-0 font-bold text-gray-500">Produk</dt>
