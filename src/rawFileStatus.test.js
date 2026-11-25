@@ -6,6 +6,7 @@ import {
   fileStatusPayload,
   mentahanStatusAction,
   rawFileMeta,
+  rawStatusSaveError,
   withListedFileStatus,
   withRawStatus,
 } from './rawFileStatus.js';
@@ -44,10 +45,10 @@ describe('status mentahan', () => {
       statusSource: 'klip',
     }, 2, usage);
     assert.equal(meta.inKlip, true);
-    const action = mentahanStatusAction({ ...meta, status: 'Sudah Dipakai' }, usage);
-    assert.equal(action.canMarkUsed, false);
-    assert.equal(action.canRevert, false);
-    assert.match(action.hint, /Klip_Vidio_RAW/);
+    const action = mentahanStatusAction({ ...meta, status: 'Sudah Dipakai' });
+    assert.equal(action.label, 'Sudah Dipakai');
+    assert.equal(action.button, '');
+    assert.equal(action.fromKlip, true);
   });
 
   test('status manual boleh dikembalikan, dan hitungan sumber ikut berubah', () => {
@@ -62,9 +63,9 @@ describe('status mentahan', () => {
       }, 1, usage),
       status: 'Sudah Dipakai',
     };
-    const action = mentahanStatusAction(file, usage);
-    assert.equal(action.canRevert, true);
-    assert.equal(action.canMarkUsed, false);
+    const action = mentahanStatusAction(file);
+    assert.equal(action.button, 'Tandai Belum Dipakai');
+    assert.equal(action.fromKlip, false);
 
     const rows = withRawStatus([
       { id: 'RAW1', status: 'Belum Dipakai' },
@@ -77,20 +78,26 @@ describe('status mentahan', () => {
     const marked = withListedFileStatus([{ ...file }], file, 'Sudah Dipakai');
     assert.equal(marked[0].status, 'Sudah Dipakai');
     assert.equal(marked[0].statusManual, true);
-    assert.equal(mentahanStatusAction(marked[0], { ids: new Set(), detectable: false }).canRevert, true);
+    assert.equal(mentahanStatusAction(marked[0]).button, 'Tandai Belum Dipakai');
   });
 
-  test('tanpa petunjuk sumber, kedua arah tetap ada beserta catatan', () => {
-    const action = mentahanStatusAction({
+  test('satu label, tombol hanya untuk belum atau status manual', () => {
+    const belum = mentahanStatusAction({ status: 'Belum Dipakai', fileKey: 'RAW__a' });
+    assert.equal(belum.label, 'Belum Dipakai');
+    assert.equal(belum.button, 'Tandai Sudah Dipakai');
+    assert.equal(belum.fromKlip, false);
+
+    const unknown = mentahanStatusAction({
       fileKey: 'RAW__tanpa',
       kategori: 'Mentahan (Raw_Asset)',
       status: 'Sudah Dipakai',
-    }, { ids: new Set(), detectable: false });
-    assert.equal(action.canRevert, true);
-    assert.match(action.hint, /Belum Dipakai/);
-    const fresh = mentahanStatusAction({ status: 'Belum Dipakai', fileKey: 'RAW__a' }, usage);
-    assert.equal(fresh.canMarkUsed, true);
-    assert.equal(fresh.canRevert, false);
+    });
+    assert.equal(unknown.label, 'Sudah Dipakai');
+    assert.equal(unknown.button, '');
+    assert.equal(unknown.fromKlip, false);
+    assert.equal(rawStatusSaveError('Action tidak dikenal'), 'Apps Script belum di-deploy versi baru');
+    assert.equal(rawStatusSaveError('Aksi tidak dikenal.'), 'Apps Script belum di-deploy versi baru');
+    assert.equal(rawStatusSaveError('Gagal jaringan'), 'Gagal jaringan');
   });
 
   test('snippet menulis Status_File dan tidak membuat tab', () => {
