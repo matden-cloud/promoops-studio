@@ -7,6 +7,7 @@ const POST_ACTIONS = new Set([
   'save_violation',
   'update_violation',
   'delete_violation',
+  'update_file_status',
 ]);
 
 // Aksi OneDrive (token dan FILE_ASSET) sengaja tidak ada di daftar ini.

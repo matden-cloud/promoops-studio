@@ -47,19 +47,38 @@ function fixture() {
 }
 
 describe('rencana upload', () => {
-  test('target November berjalan 15 video per hari sampai tanggal hari ini', () => {
+  test('target November memakai kuota akun, bawaan 3 per akun aktif', () => {
     const plan = uploadPlan({ month: '2026-11', accounts, now });
     assert.equal(plan.elapsedDays, 25);
-    assert.equal(plan.teamTarget, 375);
-    assert.equal(plan.perAccount.reduce((sum, account) => sum + account.target, 0), 375);
-    assert.deepEqual(plan.perAccount.map((account) => account.target), [63, 63, 63, 62, 62, 62]);
+    assert.equal(plan.dailyTarget, 18);
+    assert.equal(plan.caption, 'Target: 18/hari (6 akun)');
+    assert.equal(plan.teamTarget, 450);
+    assert.equal(plan.perAccount.reduce((sum, account) => sum + account.target, 0), 450);
+    assert.deepEqual(plan.perAccount.map((account) => account.perDay), [3, 3, 3, 3, 3, 3]);
+    assert.deepEqual(plan.perAccount.map((account) => account.target), [75, 75, 75, 75, 75, 75]);
     assert.equal(plan.perAccount[1].nama, 'Produk Andalan Kita');
+  });
+
+  test('kuota tersimpan menimpa bawaan dan akun nonaktif tidak ikut', () => {
+    const plan = uploadPlan({
+      month: '2026-11',
+      now,
+      accounts: [...accounts, { id: 'AKN_007', nama: 'Toko Tutup', status: 'Nonaktif' }],
+      targets: { AKN_001: 0, AKN_002: 5 },
+    });
+    assert.equal(plan.accountCount, 6);
+    assert.equal(plan.dailyTarget, 17);
+    assert.equal(plan.teamTarget, 425);
+    assert.equal(plan.perAccount[0].perDay, 0);
+    assert.equal(plan.perAccount[0].target, 0);
+    assert.equal(plan.perAccount[1].target, 125);
+    assert.equal(plan.perAccount.some((account) => account.nama === 'Toko Tutup'), false);
   });
 
   test('bulan yang sudah lewat memakai seluruh hari', () => {
     const plan = uploadPlan({ month: '2026-10', accounts, now });
     assert.equal(plan.elapsedDays, 31);
-    assert.equal(plan.teamTarget, 465);
+    assert.equal(plan.teamTarget, 558);
     assert.equal(plan.isCurrent, false);
   });
 });
@@ -79,7 +98,8 @@ describe('data laporan bulanan', () => {
     assert.equal(report.kpi.sudahDipakai, 1);
     assert.equal(report.kpi.klip, 1);
     assert.equal(report.kpi.upload, 3);
-    assert.equal(report.kpi.target, 375);
+    assert.equal(report.kpi.target, 450);
+    assert.equal(report.kpi.dailyTarget, 18);
     assert.equal(report.kpi.viewSum, 2000);
     assert.equal(report.kpi.avgView, 1000);
     assert.equal(report.kpi.maxView, 1200);
@@ -121,12 +141,15 @@ describe('data laporan bulanan', () => {
   test('insight lokal dan prompt hanya memakai angka laporan', () => {
     const report = buildMonthlyReport({ ...fixture(), month: '2026-11' });
     const bullets = localInsightBullets(report);
-    assert.ok(bullets.some((line) => line.includes('375') && line.includes('15 video/hari')));
+    assert.ok(bullets.some((line) => line.includes('450') && line.includes('18 video/hari')));
+    assert.equal(bullets.some((line) => line.includes('15 video/hari')), false);
     assert.ok(bullets.some((line) => line.includes('Alat Perata Keramik')));
     const prompt = buildInsightPrompt(report);
     assert.match(prompt, /Jangan mengarang/);
     assert.match(prompt, /bahasa Indonesia/);
-    assert.match(prompt, /Upload 3, target 375/);
+    assert.match(prompt, /Upload 3, target periode 450/);
+    assert.match(prompt, /Target: 18\/hari \(6 akun\)/);
+    assert.match(prompt, /Jual Kawat: upload 2, kuota 3\/hari, target 75/);
     assert.deepEqual(bulletsFromText('- Upload **380**\n- teks *insight* lain'), ['Upload 380', 'teks insight lain']);
   });
 });

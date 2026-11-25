@@ -42,10 +42,13 @@ function ChipSelect({ label, value, onChange, active, children }) {
   );
 }
 
-function Stat({ label, value, hint, tone = 'text-slate-900', labelTone = 'text-slate-400' }) {
+function Stat({ label, value, hint, tone = 'text-slate-900', labelTone = 'text-slate-400', action }) {
   return (
     <div className="rounded-2xl border border-black/[0.06] bg-white px-2 py-2.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">
-      <p className={`text-[8.5px] font-extrabold uppercase tracking-wide ${labelTone}`}>{label}</p>
+      <div className="flex items-start justify-between gap-1">
+        <p className={`text-[8.5px] font-extrabold uppercase tracking-wide ${labelTone}`}>{label}</p>
+        {action}
+      </div>
       <p className={`mt-0.5 text-[22px] font-extrabold leading-none tracking-tight tabular-nums ${tone}`}>{value}</p>
       {hint && <p className="mt-1 text-[9.5px] font-semibold leading-snug text-slate-500">{hint}</p>}
     </div>
@@ -73,6 +76,9 @@ export function MobilePipeline({
   cards,
   onOpenFiles,
   totals,
+  uploadHint = 'target 0/hari',
+  monthTargetLabel = 'Target 0/hr',
+  targetControl,
   ranking,
   sortBy,
   onSort,
@@ -113,12 +119,12 @@ export function MobilePipeline({
       {loading && cards.length === 0 ? (
         <p className="rounded-[20px] bg-white px-4 py-8 text-center text-sm font-semibold text-slate-400 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">Menghitung kekuatan bulanan…</p>
       ) : cards.map((card) => (
-        <MonthCard key={card.month} card={card} selected={bulan === card.month} onBulan={onBulan} onOpenFiles={onOpenFiles} />
+        <MonthCard key={card.month} card={card} selected={bulan === card.month} onBulan={onBulan} onOpenFiles={onOpenFiles} targetLabel={monthTargetLabel} />
       ))}
       <div className="grid grid-cols-3 gap-1.5">
         <Stat label="Mentahan" value={loading ? '…' : totals.mentahan} hint={`${totals.belum} belum dipakai`} labelTone="text-blue-600" />
         <Stat label="Video Final" value={loading ? '…' : totals.final} hint="klip selesai" labelTone="text-amber-600" />
-        <Stat label="Upload" value={loading ? '…' : totals.upload} hint="target 15/hari" labelTone="text-emerald-700" />
+        <Stat label="Upload" value={loading ? '…' : totals.upload} hint={uploadHint} labelTone="text-emerald-700" action={targetControl} />
       </div>
       <section className="rounded-[20px] border border-black/[0.06] bg-white p-3.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)]">
         <div className="flex items-center justify-between gap-2">
@@ -165,7 +171,7 @@ function Count({ label, value, tone, onClick }) {
   );
 }
 
-function MonthCard({ card, selected, onBulan, onOpenFiles }) {
+function MonthCard({ card, selected, onBulan, onOpenFiles, targetLabel }) {
   const width = Math.min(card.powerPercentage, 100);
   return (
     <section className={`rounded-[20px] border bg-white p-3.5 shadow-[0_8px_28px_rgba(15,23,42,0.07)] ${selected ? 'border-emerald-400' : 'border-black/[0.06]'}`}>
@@ -183,7 +189,7 @@ function MonthCard({ card, selected, onBulan, onOpenFiles }) {
       </div>
       <div className="flex justify-between text-[10px] font-bold text-slate-500">
         <span>Sisa mentahan: <b className="text-slate-900">{card.mentahanBelumDipakai} raw</b></span>
-        <span>Target 15/hr</span>
+        <span>{targetLabel}</span>
       </div>
       <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-slate-200">
         <i className="block h-full rounded-full bg-blue-500" style={{ width: `${width}%` }} />

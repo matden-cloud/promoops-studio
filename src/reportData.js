@@ -1,6 +1,7 @@
 import { buildRekapProduk, currentYearMonth, formatIdNumber, formatUploadDate, parseViewCount } from './rekapProduk.js';
 import { formatYearMonth } from './starHistory.js';
 import { isFypStatus } from './productLookup.js';
+import { summarizeUploadTarget } from './uploadTarget.js';
 import {
   foldProductText,
   isYearMonth,
@@ -10,47 +11,35 @@ import {
   shortAccountName,
 } from './pipelineFilter.js';
 
-export const DAILY_UPLOAD_TARGET = 15;
-
-function splitTarget(total, count) {
-  if (!count) return [];
-  const base = Math.floor(total / count);
-  let remainder = total - base * count;
-  return Array.from({ length: count }, () => {
-    const extra = remainder > 0 ? 1 : 0;
-    if (remainder > 0) remainder -= 1;
-    return base + extra;
-  });
-}
-
 export function uploadPlan({
   month,
   accounts = [],
   now = new Date(),
-  dailyTarget = DAILY_UPLOAD_TARGET,
+  targets,
 } = {}) {
+  const summary = summarizeUploadTarget(accounts, targets);
   const ym = isYearMonth(month) ? month : currentYearMonth(now);
   const year = Number(ym.slice(0, 4));
   const monthNumber = Number(ym.slice(5, 7));
   const daysInMonth = new Date(year, monthNumber, 0).getDate() || 30;
   const isCurrent = ym === currentYearMonth(now);
   const elapsedDays = isCurrent ? Math.min(Math.max(now.getDate(), 1), daysInMonth) : daysInMonth;
-  const teamTarget = dailyTarget * elapsedDays;
-  const fullMonthTarget = dailyTarget * daysInMonth;
-  const list = (accounts || []).filter((account) => account && (account.id || account.nama));
-  const parts = splitTarget(teamTarget, list.length);
-  const perAccount = list.map((account, index) => ({
-    id: String(account.id || ''),
-    nama: shortAccountName(account.nama || account.label || account.id, [account]),
-    target: parts[index] || 0,
+  const dailyTarget = summary.total;
+  const perAccount = summary.rows.map((row) => ({
+    id: row.id,
+    nama: row.name,
+    perDay: row.perDay,
+    target: row.perDay * elapsedDays,
   }));
   return {
     month: ym,
     dailyTarget,
+    accountCount: summary.count,
+    caption: summary.caption,
     daysInMonth,
     elapsedDays,
-    teamTarget,
-    fullMonthTarget,
+    teamTarget: dailyTarget * elapsedDays,
+    fullMonthTarget: dailyTarget * daysInMonth,
     perAccount,
     isCurrent,
   };
@@ -196,7 +185,7 @@ export function buildMonthlyReport(input = {}) {
     month,
     accounts,
     now,
-    dailyTarget: input.dailyTarget || DAILY_UPLOAD_TARGET,
+    targets: input.targets,
   });
   const uploadCounts = new Map();
   for (const row of pubs) {
@@ -206,6 +195,7 @@ export function buildMonthlyReport(input = {}) {
   let accountRows = plan.perAccount.map((account) => ({
     id: account.id,
     nama: account.nama,
+    perDay: account.perDay,
     upload: uploadCounts.get(String(account.id || '').toUpperCase()) || 0,
     target: account.target,
   }));
@@ -218,7 +208,7 @@ export function buildMonthlyReport(input = {}) {
   } else {
     const matched = accountRows.reduce((sum, row) => sum + row.upload, 0);
     const other = pubs.length - matched;
-    if (other > 0) accountRows.push({ id: '', nama: 'Akun lain', upload: other, target: 0 });
+    if (other > 0) accountRows.push({ id: '', nama: 'Akun lain', perDay: 0, upload: other, target: 0 });
   }
   accountRows = accountRows
     .map((row) => ({
@@ -293,7 +283,7 @@ export function buildMonthlyReport(input = {}) {
 export function localInsightBullets(report) {
   const kpi = report?.kpi || {};
   const bullets = [];
-  bullets.push(`Upload ${formatIdNumber(kpi.upload || 0)} dari target rencana ${formatIdNumber(kpi.target || 0)} (${kpi.dailyTarget || DAILY_UPLOAD_TARGET} video/hari × ${kpi.elapsedDays || 0} hari${kpi.ratio != null ? `, ${kpi.ratio}%` : ''}).`);
+  bullets.push(`Upload ${formatIdNumber(kpi.upload || 0)} dari target rencana ${formatIdNumber(kpi.target || 0)} (${formatIdNumber(kpi.dailyTarget || 0)} video/hari × ${kpi.elapsedDays || 0} hari${kpi.ratio != null ? `, ${kpi.ratio}%` : ''}).`);
   bullets.push(`Mentahan ${formatIdNumber(kpi.mentahan || 0)} file: ${formatIdNumber(kpi.belumDipakai || 0)} belum dipakai dan ${formatIdNumber(kpi.sudahDipakai || 0)} sudah dipakai. Klip selesai ${formatIdNumber(kpi.klip || 0)}.`);
   const top = report?.products?.[0];
   bullets.push(top
@@ -319,7 +309,7 @@ export function buildInsightPrompt(report) {
     `${item.name}: upload ${item.upload}, mentahan ${item.raw}, edit ${item.edit}, view ${item.viewSum}, rata-rata ${item.avgView ?? '-'}`
   )).join('\n');
   const accounts = (report.accounts || []).map((item) => (
-    `${item.nama}: upload ${item.upload}, target ${item.target}`
+    `${item.nama}: upload ${item.upload}, kuota ${item.perDay ?? 0}/hari, target ${item.target}`
   )).join('\n');
   const videos = (report.videos || []).slice(0, 3).map((item) => (
     `${item.date} ${item.produk} ${item.akun} ${item.view} view`
@@ -331,7 +321,8 @@ export function buildInsightPrompt(report) {
     'Sebutkan upload dibanding target, produk teratas, dan akun yang di bawah target bila ada.',
     `Bulan: ${report.monthLabel}. Tim/akun: ${report.timLabel}. Produk: ${report.produkLabel}.`,
     `Mentahan ${kpi.mentahan}, belum dipakai ${kpi.belumDipakai}, sudah dipakai ${kpi.sudahDipakai}, klip ${kpi.klip}.`,
-    `Upload ${kpi.upload}, target ${kpi.target} (${kpi.dailyTarget}/hari × ${kpi.elapsedDays} hari).`,
+    `Target upload hanya dari rencana akun: ${report.plan?.caption || `${kpi.dailyTarget}/hari`}. Jangan memakai target 15 video per hari.`,
+    `Upload ${kpi.upload}, target periode ${kpi.target} (${kpi.dailyTarget}/hari × ${kpi.elapsedDays} hari).`,
     `View total ${kpi.viewSum}, rata-rata ${kpi.avgView ?? '-'}, tertinggi ${kpi.maxView ?? '-'}, FYP ${kpi.fyp}.`,
     products ? `Produk:\n${products}` : 'Produk: tidak ada.',
     accounts ? `Akun:\n${accounts}` : 'Akun: tidak ada.',

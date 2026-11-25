@@ -176,4 +176,27 @@ describe('blok detail dan prompt', () => {
     assert.match(pack.prompt, /Gantungan Bor/);
     assert.match(pack.fallback, /tidak ditemukan/);
   });
+
+  test('prompt memakai kuota upload per akun, bukan target 15', () => {
+    const pack = buildDashboardAiPack({
+      question: 'berapa target upload hari ini',
+      now,
+      filters: { month: 'Semua' },
+      accounts,
+      uploadPlan: {
+        caption: 'Target: 18/hari (6 akun)',
+        total: 18,
+        count: 6,
+        rows: [
+          { name: 'Jual Kawat', perDay: 3 },
+          { name: 'Produk Andalan Kita', perDay: 5 },
+        ],
+      },
+      ...sources(),
+    });
+    assert.match(pack.prompt, /Target: 18\/hari \(6 akun\)/);
+    assert.match(pack.prompt, /Jual Kawat: 3\/hari/);
+    assert.match(pack.prompt, /Produk Andalan Kita: 5\/hari/);
+    assert.match(pack.prompt, /Jangan memakai target tetap 15/);
+  });
 });

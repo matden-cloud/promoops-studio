@@ -263,22 +263,23 @@ function buildPptx(pptx, report, insights) {
   });
 
   const akunSlide = pptx.addSlide();
-  addContentChrome(akunSlide, pptx, 'Upload akun dibanding target', `Rencana tim ${report.plan?.dailyTarget || 15} video/hari, dibagi ke akun toko.`);
+  addContentChrome(akunSlide, pptx, 'Upload akun dibanding target', `${report.plan?.caption || 'Target akun'}. Target periode = kuota harian × ${report.plan?.elapsedDays || 0} hari.`);
   const akunRows = (report.accounts || []).length
     ? report.accounts.map((item) => ([
       bodyCell(clip(item.nama, 28), 'left'),
+      bodyCell(num(item.perDay)),
       bodyCell(num(item.upload)),
       bodyCell(num(item.target)),
       bodyCell(item.gap > 0 ? `+${num(item.gap)}` : num(item.gap)),
       bodyCell(item.ratio == null ? '-' : `${item.ratio}%`),
     ]))
-    : [[bodyCell('Belum ada akun pada rencana.', 'left'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-')]];
+    : [[bodyCell('Belum ada akun pada rencana.', 'left'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-')]];
   akunSlide.addTable([
-    ['Akun', 'Upload', 'Target', 'Selisih', 'Persen'].map(headerCell),
+    ['Akun', 'Kuota/hari', 'Upload', 'Target', 'Selisih', 'Persen'].map(headerCell),
     ...akunRows,
   ], {
     x: 0.45, y: 1.2, w: 12.4,
-    colW: [4.4, 2, 2, 2, 2],
+    colW: [3.6, 1.8, 1.7, 1.7, 1.8, 1.8],
     border: [
       { pt: 0.5, color: LINE },
       { pt: 0.5, color: LINE },
@@ -459,7 +460,7 @@ export async function renderMonthlyPdf(report, insights) {
   pdfColor(doc, [17, 24, 39]);
   const ratio = kpi.ratio == null ? '' : ` (${kpi.ratio}%)`;
   const viewLine = kpi.viewSum ? `View ${num(kpi.viewSum)}, rata-rata ${num(kpi.avgView)}.` : 'Data view bulan ini belum masuk.';
-  doc.text(`Upload ${num(kpi.upload)} dari target ${num(kpi.target)}${ratio}. Rencana ${kpi.dailyTarget || 15} video/hari × ${kpi.elapsedDays || 0} hari. ${viewLine}`, 12, 66);
+  doc.text(`Upload ${num(kpi.upload)} dari target ${num(kpi.target)}${ratio}. Rencana ${num(kpi.dailyTarget)} video/hari × ${kpi.elapsedDays || 0} hari. ${viewLine}`, 12, 66);
   sectionTitle(doc, 'Power bulanan', 76);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -514,10 +515,10 @@ export async function renderMonthlyPdf(report, insights) {
   }
   autoTable(doc, {
     startY: cursor,
-    head: [['Akun', 'Upload', 'Target', 'Selisih', 'Persen']],
+    head: [['Akun', 'Kuota/hari', 'Upload', 'Target', 'Selisih', 'Persen']],
     body: (report.accounts || []).length
-      ? report.accounts.map((item) => [item.nama, num(item.upload), num(item.target), item.gap > 0 ? `+${num(item.gap)}` : num(item.gap), item.ratio == null ? '-' : `${item.ratio}%`])
-      : [['Belum ada akun.', '-', '-', '-', '-']],
+      ? report.accounts.map((item) => [item.nama, num(item.perDay), num(item.upload), num(item.target), item.gap > 0 ? `+${num(item.gap)}` : num(item.gap), item.ratio == null ? '-' : `${item.ratio}%`])
+      : [['Belum ada akun.', '-', '-', '-', '-', '-']],
     styles: { font: 'helvetica', fontSize: 9, textColor: [17, 24, 39], cellPadding: 2.2 },
     headStyles: { fillColor: [6, 78, 59], textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: [248, 250, 249] },

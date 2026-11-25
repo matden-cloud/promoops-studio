@@ -718,10 +718,16 @@ export function buildDashboardAiPack(input = {}) {
     'Format jawaban markdown sederhana: tebal dengan ** **, poin dengan -, dan tabel | jika membandingkan.',
     'Jika ada blok detail produk, jadikan angka "Dalam cakupan" sebagai jawaban utama dan sebutkan catatan filter bila ada.',
     'Jika pertanyaan mencari produk tetapi tidak ada yang cocok, katakan nama itu tidak ada di data, lalu sarankan nama terdekat yang diberikan. Jangan mengisi angkanya.',
+    'Target upload hanya dari rencana akun di data. Jangan memakai target tetap 15 video per hari.',
   ].join('\n');
+  const planRows = Array.isArray(input.uploadPlan?.rows) ? input.uploadPlan.rows : [];
+  const planQuotas = planRows.map((row) => `${row.name || row.nama}: ${row.perDay}/hari`).join(', ');
+  const planCaption = input.uploadPlan?.caption
+    || (input.uploadPlan ? `Target: ${input.uploadPlan.total ?? 0}/hari (${input.uploadPlan.count ?? planRows.length} akun)` : '');
   const context = [
     `Filter layar: bulan ${screenMonth ? monthLabel(screenMonth) : 'Semua bulan'}, tanggal ${filters.date || 'semua hari'}, produk ${filters.produk && filters.produk !== 'Semua' ? filters.produk : 'semua'}, tim/akun ${filters.tim && filters.tim !== 'Semua' ? filters.tim : 'semua'}.`,
     `Total sesuai layar: mentahan ${totals.mentahan} (belum dipakai ${totals.belum}, sudah dipakai ${totals.dipakai}), klip ${totals.klip}, upload ${totals.upload}.`,
+    planCaption ? `Target upload: ${planCaption}. Kuota per akun: ${planQuotas || 'tidak ada akun aktif'}.` : '',
     monthly.length
       ? `Power bulanan: ${monthly.map((month) => `${month.label || month.month} mentahan ${month.mentahan}, produksi ${month.produksi}, publish ${month.publish}`).join(' | ')}.`
       : '',
