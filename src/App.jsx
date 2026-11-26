@@ -458,10 +458,9 @@ export default function App() {
   const [savingFileKey, setSavingFileKey] = useState(null);
   const [onlyWinningInModal, setOnlyWinningInModal] = useState(false);
   const [modalMediaFilter, setModalMediaFilter] = useState('all');
+  }, [drillDownModal]);
   useEffect(() => {
     setModalMediaFilter('all');
-  }, [drillDownModal]);
-
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
   const [rawStatusBusyKey, setRawStatusBusyKey] = useState('');
