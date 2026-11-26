@@ -2165,7 +2165,6 @@ const runBotScraper = async () => {
                   })}
                 </div>
               </div>
-              </div>
               <div className="divide-y divide-gray-100 p-4 md:px-6">
               {modalVisible.length === 0 ? (
                 <p className="py-12 text-center text-sm font-semibold text-gray-400">
