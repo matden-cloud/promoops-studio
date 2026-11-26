@@ -1916,22 +1916,63 @@ export default function App() {
     return { bg: 'bg-gray-50', text: 'text-gray-500', border: 'border-gray-200', icon: null };
   };
 
-  const runBotScraper = async () => {
-    setIsBotRunning(true);
-    try {
+const runBotScraper = async () => {
+  setIsBotRunning(true);
+  let totalUpdated = 0;
+  let totalApi = 0;
+  let batchKe = 0;
+
+  try {
+    while (true) {
+      batchKe++;
       const response = await fetch(`${APPS_SCRIPT_ENDPOINT}?action=run_update`);
-      const result = await response.json();
-      if (result.status === "success") {
-        setBotReport(result.report); 
-        fetchData(); 
-      } else {
-        alert("Gagal menjalankan bot: " + result.message);
+      const text = await response.text();
+      let result;
+      try {
+        result = JSON.parse(text);
+      } catch {
+        throw new Error(`HTTP ${response.status}: ${text.slice(0, 120)}`);
       }
-    } catch {
-      alert("Koneksi terputus. Pastikan Apps Script berjalan dengan baik.");
+
+      if (result.status !== "success") {
+        alert("Gagal menjalankan bot: " + (result.message || "Error tidak diketahui"));
+        break;
+      }
+
+      const report = result.report || {};
+      totalUpdated += Number(report.berhasilUpdate || 0);
+      totalApi += Number(report.apiTerpakai || 0);
+
+      // Otomatis lanjut batch berikutnya jika terpotong waktu 45 detik & kuota masih ada
+      if (report.terpotongWaktu && !report.apiHabis) {
+        fetchData(); // Update tampilan angka di tabel tiap selesai 1 batch
+        continue;
+      }
+
+      // Selesai semua atau kuota habis -> tampilkan laporan total
+      setBotReport({
+        ...report,
+        berhasilUpdate: totalUpdated,
+        apiTerpakai: totalApi,
+        pesan: report.apiHabis
+          ? `Kuota RapidAPI habis di batch #${batchKe}. Total ter-update: ${totalUpdated} video.`
+          : `Semua selesai (${batchKe} batch)! Total ter-update: ${totalUpdated} video (API terpakai: ${totalApi}).`
+      });
+      fetchData();
+      break;
     }
-    setIsBotRunning(false);
-  };
+  } catch (err) {
+    alert(
+      "Koneksi terputus (" +
+      (err?.message || "timeout") +
+      "). Total yang sudah sempat ter-update: " +
+      totalUpdated +
+      " video."
+    );
+    if (totalUpdated > 0) fetchData();
+  }
+  setIsBotRunning(false);
+};
 
   // --- FILTERING DATA ANALITIK FYP ---
   const listBulan = ['Semua', ...new Set(data.map(item => getBulanFormat(item.Tanggal_Upload)).filter(b => b !== 'Tanpa Tanggal' && b !== 'Format Tidak Dikenal'))];
