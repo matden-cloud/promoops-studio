@@ -457,6 +457,10 @@ export default function App() {
   const [produkCompareBulan, setProdukCompareBulan] = useState('');
   const [savingFileKey, setSavingFileKey] = useState(null);
   const [onlyWinningInModal, setOnlyWinningInModal] = useState(false);
+  const [modalMediaFilter, setModalMediaFilter] = useState('all');
+  useEffect(() => {
+    setModalMediaFilter('all');
+  }, [drillDownModal]);
 
   // --- STATE DRILL-DOWN MODAL DAFTAR FILE ASLI ---
   const [drillDownModal, setDrillDownModal] = useState(null);
@@ -2031,10 +2035,29 @@ const runBotScraper = async () => {
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
   const currentData = filteredData.slice(startIndex, endIndex);
+  const getModalMediaType = (file) => {
+    const cleanName = String(file?.name || file?.fileName || '').toLowerCase().split('?')[0].trim();
+    if (/\.(mp4|mov|mkv|webm|avi|m4v|3gp|flv|wmv)$/.test(cleanName)) return 'video';
+    if (/\.(mp3|wav|m4a|aac|ogg|flac|wma|opus)$/.test(cleanName)) return 'audio';
+    if (/\.(jpg|jpeg|png|webp|heic|heif|gif|bmp|svg)$/.test(cleanName)) return 'foto';
+    if (file?.tiktok && file.tiktok !== '#') return 'video';
+    return 'lainnya';
+  };
+
   const modalItems = drillDownModal?.items || [];
   const modalMonthFor = (file) => drillDownModal?.reportMonth || toYearMonth(file?.month) || '';
   const modalAfterStar = modalItems.filter((file) => !onlyWinningInModal || lookupFileStar(file.fileKey, modalMonthFor(file)).isWinning);
-  const modalVisible = filterBySearch(modalAfterStar, debouncedFileListQuery, (file) => (
+  const modalMediaCounts = modalAfterStar.reduce(
+    (acc, file) => {
+      acc[getModalMediaType(file)] += 1;
+      return acc;
+    },
+    { video: 0, audio: 0, foto: 0, lainnya: 0 }
+  );
+  const modalAfterMedia = modalMediaFilter === 'all'
+    ? modalAfterStar
+    : modalAfterStar.filter((file) => getModalMediaType(file) === modalMediaFilter);
+  const modalVisible = filterBySearch(modalAfterMedia, debouncedFileListQuery, (file) => (
     fileListSearchFields(file).concat(formatStarBadge(lookupFileStar(file.fileKey, modalMonthFor(file)).months))
   ));
   const modalStarredCount = modalItems.filter((file) => lookupFileStar(file.fileKey, modalMonthFor(file)).isWinning).length;
@@ -2101,14 +2124,47 @@ const runBotScraper = async () => {
             </div>
 
             <div className="overflow-y-auto flex-1 bg-gray-50/40">
-              <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-4 py-3 md:px-6">
+              <div className="sticky top-0 z-10 border-b border-gray-100 bg-white px-4 py-3 md:px-6 space-y-2.5">
                 <SearchBox
                   id="search-daftar-file"
                   value={fileListQuery}
                   onChange={setFileListQuery}
                   shown={modalVisible.length}
-                  total={modalAfterStar.length}
+                  total={modalAfterMedia.length}
                 />
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { key: 'all', label: 'Semua', count: modalAfterStar.length },
+                    { key: 'video', label: 'Video', count: modalMediaCounts.video },
+                    { key: 'audio', label: 'Audio', count: modalMediaCounts.audio },
+                    { key: 'foto', label: 'Foto', count: modalMediaCounts.foto },
+                    ...(modalMediaCounts.lainnya > 0
+                      ? [{ key: 'lainnya', label: 'Lainnya', count: modalMediaCounts.lainnya }]
+                      : [])
+                  ].map((tab) => {
+                    const active = modalMediaFilter === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        type="button"
+                        onClick={() => setModalMediaFilter(tab.key)}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                          active
+                            ? 'bg-gray-900 text-white border-gray-900 shadow-sm'
+                            : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                        }`}
+                      >
+                        <span>{tab.label}</span>
+                        <span className={`px-1.5 py-0.5 rounded-full text-[11px] font-bold ${
+                          active ? 'bg-white/20 text-white' : 'bg-white text-gray-700 border border-gray-200'
+                        }`}>
+                          {tab.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               </div>
               <div className="divide-y divide-gray-100 p-4 md:px-6">
               {modalVisible.length === 0 ? (
