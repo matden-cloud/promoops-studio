@@ -1,4 +1,5 @@
 import { isItemId } from './onedrive-plan.js';
+import { mintOneDriveDownloadUrl } from './onedrive.js';
 import {
   CAPTION_LIMIT,
   isScheduleAt,
@@ -250,7 +251,92 @@ function buildCreateBody(payload, config, request, now = Date.now()) {
   };
 }
 
-async function createSchedule(request, config, fetchImpl, now) {
+async function uploadOneDriveToReplizStorage({ fileId, fileName, config, fetchImpl, mintImpl = mintOneDriveDownloadUrl }) {
+  // 1. Ambil URL download sementara dari OneDrive saat tombol Jadwalkan diklik
+  const minted = await mintImpl({ env: config.env, itemId: fileId });
+  if (!minted?.ok || typeof minted.url !== 'string' || !minted.url.startsWith('https://')) {
+    throw new HttpError(
+      Number(minted?.status) || 502,
+      minted?.message || 'Gagal menyiapkan link download OneDrive.',
+      'onedrive_error',
+    );
+  }
+
+  // 2. Unduh binary video dari OneDrive ke server
+  let dlRes;
+  try {
+    dlRes = await fetchImpl(minted.url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: AbortSignal.timeout(40_000),
+    });
+  } catch {
+    throw new HttpError(502, 'Gagal mengunduh video dari OneDrive ke server.', 'onedrive_download_failed');
+  }
+  if (!dlRes.ok) {
+    throw new HttpError(502, `Gagal mengunduh video dari OneDrive (HTTP ${dlRes.status}).`, 'onedrive_download_failed');
+  }
+
+  const fileBuffer = Buffer.from(await dlRes.arrayBuffer());
+  if (!fileBuffer.length) {
+    throw new HttpError(502, 'File video dari OneDrive kosong.', 'onedrive_empty');
+  }
+
+  const rawType = (dlRes.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const mimetype = rawType && rawType.startsWith('video/') ? rawType : 'video/mp4';
+  const safeName = (text(fileName) || `${fileId.replace(/[^A-Za-z0-9_-]/g, '_')}.mp4`)
+    .replace(/[^\w.\-() ]+/g, '_');
+  const filename = /\.[a-z0-9]{2,5}$/i.test(safeName) ? safeName : `${safeName}.mp4`;
+
+  // 3. Step 1 Repliz Storage: Init upload session
+  const initRes = await callRepliz(fetchImpl, `${REPLIZ_ORIGIN}/public/storage/file/init`, {
+    method: 'POST',
+    config,
+    body: { filename, size: fileBuffer.length, mimetype },
+  });
+  const initPayload = await readJson(initRes);
+  if (initRes.status === 402) {
+    throw new HttpError(402, 'Kuota Repliz Storage penuh. Hapus file lama di Storage Repliz terlebih dahulu.', 'storage_full');
+  }
+  if (!initRes.ok) upstreamFailure(initRes, initPayload, secretsOf(config));
+
+  const initData = initPayload?.data || initPayload || {};
+  const storageId = text([invalid URL] || initData._id);
+  const uploadUrl = text(initData.upload);
+  const publicUrl = text(initData.url);
+  if (!storageId || !uploadUrl || !publicUrl) {
+    throw new HttpError(502, 'Respons init Repliz Storage tidak lengkap.', 'repliz_storage_error');
+  }
+
+  // 4. Step 2 Repliz Storage: PUT binary langsung ke presigned URL (tanpa header Authorization)
+  let putRes;
+  try {
+    putRes = await fetchImpl(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': mimetype },
+      body: fileBuffer,
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch {
+    throw new HttpError(502, 'Gagal mengunggah video ke Repliz Storage.', 'repliz_storage_upload_failed');
+  }
+  if (!putRes.ok) {
+    throw new HttpError(502, `Gagal mengunggah video ke Repliz Storage (HTTP ${putRes.status}).`, 'repliz_storage_upload_failed');
+  }
+
+  // 5. Step 3 Repliz Storage: Complete upload agar URL storage.repliz.com aktif
+  const completeRes = await callRepliz(
+    fetchImpl,
+    `${REPLIZ_ORIGIN}/public/storage/file/${encodeURIComponent(storageId)}/complete`,
+    { method: 'POST', config, body: {} },
+  );
+  const completePayload = await readJson(completeRes);
+  if (!completeRes.ok) upstreamFailure(completeRes, completePayload, secretsOf(config));
+
+  return publicUrl;
+}
+
+async function createSchedule(request, config, fetchImpl, now, mintImpl) {
   requireReady(config);
   let payload;
   try {
@@ -263,16 +349,33 @@ async function createSchedule(request, config, fetchImpl, now) {
     if (payload.action === 'cancel') return cancelSchedule(config, fetchImpl, text(payload.scheduleId));
     throw new HttpError(400, 'Aksi jadwal tidak dikenal.', 'unknown_action');
   }
-  const built = buildCreateBody(payload, config, request, typeof now === 'number' ? now : Date.now());
+
+  // Validasi semua field dulu sebelum transfer video
+  const built = buildCreateBody(payload, config, request, typeof now === 'number' ? now : [invalid URL]());
+
+  // Salin video dari OneDrive ke Repliz Storage, lalu pakai URL storage.repliz.com
+  const storageUrl = await uploadOneDriveToReplizStorage({
+    fileId: text(payload?.fileId),
+    fileName: text(payload?.fileName),
+    config,
+    fetchImpl,
+    mintImpl,
+  });
+
+  const upstreamBody = {
+    ...built.upstream,
+    medias: [{ type: 'video', url: storageUrl }],
+  };
+
   const response = await callRepliz(fetchImpl, `${REPLIZ_ORIGIN}/public/schedule`, {
     method: 'POST',
     config,
-    body: built.upstream,
+    body: upstreamBody,
   });
   const result = await readJson(response);
   if (!response.ok) upstreamFailure(response, result, secretsOf(config));
   const scheduleId = text(result?._id || result?.id || result?.data?._id || result?.data?.id);
-  return json({ status: 'success', scheduleId });
+  return json({ status: 'success', scheduleId, mediaUrl: storageUrl });
 }
 
 async function retrySchedule(config, fetchImpl, scheduleId) {
@@ -403,7 +506,7 @@ export async function handleReplizScheduleRequest(request, deps = {}) {
     const method = request.method.toUpperCase();
     const url = new URL(request.url);
     if (method === 'GET') return await listSchedules(request, config, fetchImpl);
-    if (method === 'POST') return await createSchedule(request, config, fetchImpl, deps.now);
+    if (method === 'POST') return await createSchedule(request, config, fetchImpl, [invalid URL], [invalid URL]Impl);
     if (method === 'PUT') return await retrySchedule(config, fetchImpl, text(url.searchParams.get('scheduleId')));
     if (method === 'DELETE') return await cancelSchedule(config, fetchImpl, text(url.searchParams.get('scheduleId')));
     throw new HttpError(405, 'Metode tidak diizinkan.', 'method_not_allowed');
