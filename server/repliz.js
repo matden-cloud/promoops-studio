@@ -444,23 +444,43 @@ async function listSchedules(request, config, fetchImpl) {
       totalDocs: 0,
     });
   }
-  const upstream = new URL(`${REPLIZ_ORIGIN}/public/schedule`);
+const upstream = new URL(`${REPLIZ_ORIGIN}/public/schedule`);
   upstream.searchParams.set('page', String(page));
   upstream.searchParams.set('limit', String(limit));
   if (status) upstream.searchParams.set('status', status);
-  const response = await callRepliz(fetchImpl, upstream.toString(), { config });
-  const payload = await readJson(response);
+  let response = await callRepliz(fetchImpl, upstream.toString(), { config });
+  let payload = await readJson(response);
   if (!response.ok) upstreamFailure(response, payload, secretsOf(config));
+
+  // Balik nomor halaman agar Halaman 1 selalu mengambil data terbaru dari halaman terakhir Repliz
+  const totalPages = Number(payload?.totalPages) || 1;
+  if (totalPages > 1) {
+    const reversedPage = Math.max(1, totalPages - page + 1);
+    if (reversedPage !== page) {
+      upstream.searchParams.set('page', String(reversedPage));
+      response = await callRepliz(fetchImpl, upstream.toString(), { config });
+      payload = await readJson(response);
+      if (!response.ok) upstreamFailure(response, payload, secretsOf(config));
+    }
+  }
+
   const secrets = secretsOf(config);
+  const items = [];
+  for (const row of asList(payload)) {
+    const mapped = mapSchedule(row, secrets);
+    if (mapped) items.push(mapped);
+  }
+  items.sort((a, b) => (new Date(b.scheduleAt || 0).getTime() || 0) - (new Date(a.scheduleAt || 0).getTime() || 0));
+
   return json({
     configured: config.configured,
     missing: config.missing,
     message: config.configured ? '' : CONFIG_MESSAGE,
-    schedules: asList(payload).map((row) => mapSchedule(row, secrets)).filter(Boolean),
-    page: Number(payload?.page) || page,
+    schedules: items,
+    page,
     limit: Number(payload?.limit) || limit,
-    totalPages: Number(payload?.totalPages) || 1,
-    totalDocs: Number(payload?.totalDocs) || asList(payload).length,
+    totalPages,
+    totalDocs: Number(payload?.totalDocs) || items.length,
   });
 }
 
