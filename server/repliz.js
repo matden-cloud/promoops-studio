@@ -301,7 +301,7 @@ async function uploadOneDriveToReplizStorage({ fileId, fileName, config, fetchIm
   if (!initRes.ok) upstreamFailure(initRes, initPayload, secretsOf(config));
 
   const initData = initPayload?.data || initPayload || {};
-  const storageId = text([invalid URL] || initData._id);
+  const storageId = text(initData['id'] || initData['_id']);
   const uploadUrl = text(initData.upload);
   const publicUrl = text(initData.url);
   if (!storageId || !uploadUrl || !publicUrl) {
@@ -351,7 +351,7 @@ async function createSchedule(request, config, fetchImpl, now, mintImpl) {
   }
 
   // Validasi semua field dulu sebelum transfer video
-  const built = buildCreateBody(payload, config, request, typeof now === 'number' ? now : [invalid URL]());
+  const built = buildCreateBody(payload, config, request, typeof now === 'number' ? now : new Date().getTime());
 
   // Salin video dari OneDrive ke Repliz Storage, lalu pakai URL storage.repliz.com
   const storageUrl = await uploadOneDriveToReplizStorage({
@@ -506,7 +506,7 @@ export async function handleReplizScheduleRequest(request, deps = {}) {
     const method = request.method.toUpperCase();
     const url = new URL(request.url);
     if (method === 'GET') return await listSchedules(request, config, fetchImpl);
-    if (method === 'POST') return await createSchedule(request, config, fetchImpl, [invalid URL], [invalid URL]Impl);
+    if (method === 'POST') return await createSchedule(request, config, fetchImpl, deps['now'], deps['mintImpl']);
     if (method === 'PUT') return await retrySchedule(config, fetchImpl, text(url.searchParams.get('scheduleId')));
     if (method === 'DELETE') return await cancelSchedule(config, fetchImpl, text(url.searchParams.get('scheduleId')));
     throw new HttpError(405, 'Metode tidak diizinkan.', 'method_not_allowed');
