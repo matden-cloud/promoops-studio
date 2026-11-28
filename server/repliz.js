@@ -117,6 +117,19 @@ function fileIdFromMedia(value) {
     return '';
   }
 }
+function fileNameFromMedia(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    const segment = decodeURIComponent(parsed.pathname.split('/').pop() || '').trim();
+    if (!segment || segment === 'repliz-media') return '';
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[a-z0-9]+$/i.test(segment)) {
+      return '';
+    }
+    return segment;
+  } catch {
+    return '';
+  }
+}
 
 function mapSchedule(row, secrets) {
   const id = text(row?._id || row?.id);
@@ -133,6 +146,7 @@ function mapSchedule(row, secrets) {
     accountName: text(row?.account?.name || row?.account?.username),
     accountUsername: text(row?.account?.username),
     fileId: fileIdFromMedia(media?.url),
+    mediaFileName: fileNameFromMedia(media?.url),
   };
 }
 
@@ -413,7 +427,7 @@ async function cancelSchedule(config, fetchImpl, scheduleId) {
 async function listSchedules(request, config, fetchImpl) {
   const url = new URL(request.url);
   const page = clampPage(url.searchParams.get('page'), 1);
-  const limit = Math.min(100, clampPage(url.searchParams.get('limit'), 20));
+  const limit = Math.min(100, clampPage(url.searchParams.get('limit'), 100));
   const status = text(url.searchParams.get('status')).toLowerCase();
   if (status && !STATUSES.has(status)) {
     throw new HttpError(400, 'Status jadwal tidak dikenal.', 'invalid_status');
