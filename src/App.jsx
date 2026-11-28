@@ -1830,6 +1830,198 @@ export default function App() {
           publish: item.publish,
         })),
       });
+      const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(String(reader.result || ''));
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+    const fetchEmbedMp4 = async (fileId) => {
+      if (!fileId || kind !== 'ppt') return '';
+      try {
+        const res = await fetch(`/api/onedrive-stream?id=${encodeURIComponent(fileId)}&proxy=1`);
+        if (!res.ok) return '';
+        const blob = await res.blob();
+        if (blob.size <= 0 || blob.size > 20 * 1024 * 1024) return '';
+        const b64 = await blobToBase64(blob);
+        const rawPart = b64.includes(',') ? b64.split(',')[1] : b64;
+        return `video/mp4;base64,${rawPart}`;
+      } catch {
+        return '';
+      }
+    };
+
+    const normKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // 1. Mentahan Paling Banyak & Mentahan Paling Bagus (Bintang)
+    const rawInMonth = (rawAssets || []).filter((r) => !month || toYearMonth(r.month) === month);
+    const rawByProd = {};
+    const starredRawList = [];
+    for (let idx = 0; idx < rawInMonth.length; idx++) {
+      const r = rawInMonth[idx];
+      const prod = r.produk || 'Lainnya';
+      if (!rawByProd[prod]) rawByProd[prod] = { produk: prod, total: 0, belum: 0, sudah: 0 };
+      rawByProd[prod].total += 1;
+      if (String(r.status || '').toLowerCase().includes('belum')) rawByProd[prod].belum += 1;
+      else rawByProd[prod].sudah += 1;
+
+      const fKey = `RAW__${String(r['id'] || r.fileName || idx).trim()}`;
+      const star = lookupFileStar(fKey, month);
+      if (star?.isWinning) {
+        starredRawList.push({
+          fileName: r.fileName || 'Mentahan',
+          produk: prod,
+          creator: r.creator || '-',
+          catatan: star.catatan || '',
+          fileId: r.fileId || '',
+          url: r.url || '',
+        });
+      }
+    }
+    const mentahanTerbanyak = Object.values(rawByProd).sort((a, b) => b.total - a.total).slice(0, 10);
+
+    const mentahanBagusVideos = [];
+    for (const item of starredRawList.slice(0, 3)) {
+      const isVid = /\.(mp4|mov|m4v|webm)$/i.test(String(item.fileName || ''));
+      const dataUri = isVid ? await fetchEmbedMp4(item.fileId) : '';
+      mentahanBagusVideos.push({ ...item, dataUri });
+    }
+
+    // 2. Data Upload Repliz
+    let replizSummary = { total: 0, success: 0, pending: 0, process: 0, error: 0, rows: [] };
+    try {
+      const rRes = await fetch('/api/repliz-schedule?limit=100');
+      if (rRes.ok) {
+        const rJson = await rRes.json();
+        const allSched = Array.isArray(rJson?.schedules) ? rJson.schedules : [];
+        const inMonth = allSched.filter((s) => !month || String(s.scheduleAt || '').startsWith(month));
+        const pool = inMonth.length ? inMonth : allSched;
+        for (const s of pool) {
+          replizSummary.total += 1;
+          if (s.status === 'success') replizSummary.success += 1;
+          else if (s.status === 'pending') replizSummary.pending += 1;
+          else if (s.status === 'process') replizSummary.process += 1;
+          else if (s.status === 'error') replizSummary.error += 1;
+        }
+        replizSummary.rows = pool.slice(0, 5);
+      }
+    } catch {}
+
+    // 3. Video FYP Berbintang (fallback: Top 3 View Tertinggi bulan ini) + cocokkan MP4 OneDrive
+    const klipById = {};
+    const klipByName = {};
+    for (const k of (klipVideos || [])) {
+      if (k['id']) klipById[String(k['id']).trim()] = k;
+      if (k.fileId) klipById[String(k.fileId).trim()] = k;
+      if (k.fileName) klipByName[normKey(k.fileName)] = k;
+    }
+
+    const fypInMonth = (data || []).filter((row) => !month || toYearMonth(row._isoDate || row.Tanggal_Upload) === month);
+    const fypStarred = [];
+    const fypAllSorted = fypInMonth.slice().sort((a, b) => (Number(b.View) || 0) - (Number(a.View) || 0));
+
+    for (let idx = 0; idx < fypAllSorted.length; idx++) {
+      const row = fypAllSorted[idx];
+      const urlVal = String(row.Link_Post || row.URL || row.Link || '').trim();
+      const idKlip = String(row.ID_Klip || row.Id_Klip || '').trim();
+      const namaFile = String(row.Nama_File || '').trim();
+      const matchedKlip = klipById[idKlip] || klipByName[normKey(namaFile)] || null;
+
+      const possibleKeys = [
+        urlVal ? `FYP__${urlVal}` : '',
+        idKlip ? `KLIP__${idKlip}` : '',
+        namaFile ? `FYP__${namaFile}` : '',
+      ].filter(Boolean);
+      let isStar = false;
+      let catatan = '';
+      for (const pk of possibleKeys) {
+        const st = lookupFileStar(pk, month);
+        if (st?.isWinning) {
+          isStar = true;
+          catatan = st.catatan || '';
+          break;
+        }
+      }
+      if (isStar) {
+        fypStarred.push({
+          fileName: namaFile || matchedKlip?.fileName || row.Induk_Barang || 'Video FYP',
+          produk: row.Induk_Barang || matchedKlip?.produk || '-',
+          akun: row.Nama_Akun || row.ID_Akun || '-',
+          view: Number(row.View) || 0,
+          status: row.Video_FYP || '-',
+          catatan,
+          fileId: matchedKlip?.fileId || '',
+          url: urlVal || matchedKlip?.url || '',
+        });
+      }
+    }
+
+    const fypPicked = fypStarred.length ? fypStarred.slice(0, 3) : [];
+    if (fypPicked.length === 0) {
+      for (const row of fypAllSorted.slice(0, 3)) {
+        const idKlip = String(row.ID_Klip || row.Id_Klip || '').trim();
+        const namaFile = String(row.Nama_File || '').trim();
+        const matchedKlip = klipById[idKlip] || klipByName[normKey(namaFile)] || null;
+        fypPicked.push({
+          fileName: namaFile || matchedKlip?.fileName || row.Induk_Barang || 'Video FYP',
+          produk: row.Induk_Barang || matchedKlip?.produk || '-',
+          akun: row.Nama_Akun || row.ID_Akun || '-',
+          view: Number(row.View) || 0,
+          status: row.Video_FYP || '-',
+          catatan: '',
+          fileId: matchedKlip?.fileId || '',
+          url: String(row.Link_Post || row.URL || matchedKlip?.url || '').trim(),
+        });
+      }
+    }
+
+    const fypBagusVideos = [];
+    for (const item of fypPicked) {
+      const dataUri = await fetchEmbedMp4(item.fileId);
+      fypBagusVideos.push({ ...item, dataUri });
+    }
+
+    // 4. Evaluasi Pelanggaran
+    const violInMonth = (violations || []).filter((v) => !month || toYearMonth(v.tanggal) === month);
+    const violPool = violInMonth.length ? violInMonth : (violations || []);
+
+    // 5. Power Bulanan & Rata-rata Power Pembuatan + Upload Video
+    const powerRows = [];
+    let sumProd = 0;
+    let sumPub = 0;
+    let sumRaw = 0;
+    let activeProdMonths = 0;
+    let activePubMonths = 0;
+    for (const m of (monthlyPowerCards || [])) {
+      const mentahan = Number(m.mentahan) || 0;
+      const produksi = Number(m.produksi) || 0;
+      const publish = Number(m.publish) || 0;
+      if (mentahan === 0 && produksi === 0 && publish === 0) continue;
+      powerRows.push({ label: m.title || m.month, mentahan, produksi, publish });
+      sumRaw += mentahan;
+      if (produksi > 0) { sumProd += produksi; activeProdMonths += 1; }
+      if (publish > 0) { sumPub += publish; activePubMonths += 1; }
+    }
+    const avgProduksi = activeProdMonths ? Math.round(sumProd / activeProdMonths) : 0;
+    const avgPublish = activePubMonths ? Math.round(sumPub / activePubMonths) : 0;
+    const avgMentahan = powerRows.length ? Math.round(sumRaw / powerRows.length) : 0;
+
+    report.extras = {
+      mentahanTerbanyak,
+      mentahanBagusVideos,
+      repliz: replizSummary,
+      fypBagusVideos,
+      violations: { total: violPool.length, rows: violPool.slice(0, 7) },
+      power: {
+        rows: powerRows.slice(0, 8),
+        avgMentahan,
+        avgProduksi,
+        avgPublish,
+        activeProdMonths,
+        activePubMonths,
+      },
+    };
       const insights = await insightsForReport(report);
       const exporter = await import('./reportExport.js');
       if (kind === 'ppt') await exporter.downloadMonthlyPpt(report, insights);
