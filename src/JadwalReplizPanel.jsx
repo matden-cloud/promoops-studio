@@ -56,7 +56,7 @@ async function readJson(response) {
 }
 
 function StatusChip({ status }) {
-  const view = View(status);
+  const view = scheduleStatusView(status);
   const tone = {
     menunggu: 'bg-amber-50 text-amber-800 border-amber-200',
     diproses: 'bg-blue-50 text-blue-700 border-blue-100',
@@ -613,8 +613,6 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             body: JSON.stringify({
               accountId: row.accountId,
               fileId: row.fileId,
-              accountId: row.accountId,
-              fileId: row.fileId,
               fileName: row.fileName,
               scheduleAt: toScheduleAt(row.date, row.time),
               caption: row.caption,
@@ -1086,7 +1084,7 @@ const sortedSchedules = schedules.slice().sort((a, b) => {
         </div>
         {scheduleError && <p className="px-4 pb-2 text-xs font-semibold text-red-700">{scheduleError}</p>}
         <div className="divide-y divide-gray-100 lg:hidden">
-          {schedules.length === 0 && (
+          {sortedSchedules.length === 0 && (
             <p className="px-4 py-8 text-center text-sm text-gray-500">{scheduleBusy ? 'Memuat jadwal…' : 'Belum ada jadwal pada filter ini.'}</p>
           )}
           {schedules.map((item) => {
@@ -1127,15 +1125,21 @@ const displayFileName = video?.fileName || item.mediaFileName || '';
               </tr>
             </thead>
             <tbody>
-              {schedules.length === 0 && (
+              {sortedSchedules.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">
                     {scheduleBusy ? 'Memuat jadwal…' : 'Belum ada jadwal pada filter ini.'}
                   </td>
                 </tr>
               )}
-              {schedules.map((item) => {
-                const video = candidateById.get(item.fileId);
+              {sortedSchedules.map((item) => {
+                const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const video =
+  candidateById.get(item.fileId) ||
+  (item.mediaFileName
+    ? Array.from(candidateById.values()).find((v) => normName(v.fileName) === normName(item.mediaFileName))
+    : null);
+const displayFileName = video?.fileName || item.mediaFileName || '';
                 const view = scheduleStatusView(item.status);
                 return (
                   <tr key={item.id} className="border-b border-gray-100">
