@@ -56,7 +56,7 @@ async function readJson(response) {
 }
 
 function StatusChip({ status }) {
-  const view = scheduleStatusView(status);
+  const view = View(status);
   const tone = {
     menunggu: 'bg-amber-50 text-amber-800 border-amber-200',
     diproses: 'bg-blue-50 text-blue-700 border-blue-100',
@@ -217,8 +217,9 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
   const [statusMode, setStatusMode] = useState('loading');
   const [statusMessage, setStatusMessage] = useState('');
   const [statusBusy, setStatusBusy] = useState(false);
-  const [scheduleStatus, setScheduleStatus] = useState('');
   const [schedulePage, setSchedulePage] = useState(1);
+  const [scheduleSort, setScheduleSort] = useState('newest');
+  const [scheduleStatus, setScheduleStatus] = useState('');
   const [scheduleMeta, setScheduleMeta] = useState({ totalPages: 1, totalDocs: 0 });
   const [scheduleError, setScheduleError] = useState('');
   const [scheduleBusy, setScheduleBusy] = useState(false);
@@ -612,6 +613,9 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             body: JSON.stringify({
               accountId: row.accountId,
               fileId: row.fileId,
+              accountId: row.accountId,
+              fileId: row.fileId,
+              fileName: row.fileName,
               scheduleAt: toScheduleAt(row.date, row.time),
               caption: row.caption,
               additionalInfo: {
@@ -673,7 +677,11 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
   const planState = planRows.some((row) => row.sendState === 'failed')
     ? 'Sebagian gagal — periksa barisnya'
     : (pendingRows.length ? 'Belum dikirim — menunggu konfirmasi' : 'Terkirim');
-
+const sortedSchedules = schedules.slice().sort((a, b) => {
+    const ta = new Date(a.scheduleAt || 0).getTime() || 0;
+    const tb = new Date(b.scheduleAt || 0).getTime() || 0;
+    return scheduleSort === 'newest' ? tb - ta : ta - tb;
+  });
   return (
     <div id="jadwal-repliz" className="mx-auto flex max-w-[1400px] flex-col p-4 md:p-8 lg:block">
       <div className="order-1 mb-5 hidden lg:block">
@@ -738,6 +746,13 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
               Refresh
             </button>
           </div>
+          <button
+  type="button"
+  onClick={() => setScheduleSort((prev) => (prev === 'newest' ? 'oldest' : 'newest'))}
+  className="px-3 py-1 rounded-full text-xs font-semibold border bg-white text-gray-700 border-gray-300 hover:bg-gray-50 transition-colors"
+>
+  {scheduleSort === 'newest' ? '↓ Terbaru' : '↑ Terlama'}
+</button>
           <div className="mt-3 grid grid-cols-4 gap-2">
             {REPLIZ_STATUS_COUNTS.map((item) => {
               const value = statusMode === 'ready' && statusCounts ? statusCounts[item.id] : (statusMode === 'loading' ? '…' : '—');
@@ -1075,7 +1090,13 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
             <p className="px-4 py-8 text-center text-sm text-gray-500">{scheduleBusy ? 'Memuat jadwal…' : 'Belum ada jadwal pada filter ini.'}</p>
           )}
           {schedules.map((item) => {
-            const video = candidateById.get(item.fileId);
+            const normName = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const video =
+  candidateById.get(item.fileId) ||
+  (item.mediaFileName
+    ? Array.from(candidateById.values()).find((v) => normName(v.fileName) === normName(item.mediaFileName))
+    : null);
+const displayFileName = video?.fileName || item.mediaFileName || '';
             const view = scheduleStatusView(item.status);
             return (
               <article key={`m-${item.id}`} className="space-y-1 px-4 py-3">
@@ -1118,7 +1139,20 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
                 const view = scheduleStatusView(item.status);
                 return (
                   <tr key={item.id} className="border-b border-gray-100">
-                    <td className="px-4 py-3 text-xs font-semibold text-gray-800">{video?.fileName || item.description || 'Video'}</td>
+                    <td className="px-4 py-3 text-xs text-gray-800">
+  {displayFileName ? (
+    <>
+      <div className="font-semibold text-gray-900 break-all">{displayFileName}</div>
+      {item.description && (
+        <div className="mt-0.5 line-clamp-2 text-[11px] font-normal text-gray-500">
+          {item.description}
+        </div>
+      )}
+    </>
+  ) : (
+    <div className="font-semibold text-gray-800">{item.description || 'Video'}</div>
+  )}
+</td>
                     <td className="px-2 py-3 text-xs font-semibold text-gray-700">{video?.product || '—'}</td>
                     <td className="px-2 py-3 text-xs font-semibold text-gray-600">{item.accountName || item.accountUsername || '—'}</td>
                     <td className="px-2 py-3 text-xs font-semibold text-gray-800">{formatScheduleWib(item.scheduleAt)}</td>
