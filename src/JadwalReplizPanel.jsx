@@ -137,6 +137,7 @@ function StockStat({ label, value, tone, shortLabel }) {
 }
 
 function AccountMapCard({ links, summary, masters, onMap }) {
+  const [showAccountMap, setShowAccountMap] = useState(false);
   if (!links.length) return null;
   return (
     <section className="order-2 mb-5 rounded-2xl border border-sky-100 bg-white p-4 shadow-sm">
@@ -145,56 +146,68 @@ function AccountMapCard({ links, summary, masters, onMap }) {
           <h3 className="text-[15px] font-bold text-gray-900">Pemetaan akun Repliz ke MASTER_AKUN</h3>
           <p className="mt-1 text-xs text-gray-500">Username yang cocok dipasangkan otomatis, lalu nama yang sama persis. Yang ragu diatur di sini, disimpan di browser — bukan di Sheets.</p>
         </div>
-        <p className="rounded-full border border-sky-100 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800">
-          {summary.auto} otomatis · {summary.manual} manual · {summary.unlinked} belum
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="rounded-full border border-sky-100 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800">
+            {summary.auto} otomatis · {summary.manual} manual · {summary.unlinked} belum
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowAccountMap((prev) => !prev)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition-colors"
+          >
+            {showAccountMap ? '˄ Sembunyikan' : '˅ Tampilkan Pemetaan'}
+          </button>
+        </div>
       </div>
-      <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
-        {links.map((link) => {
-          const auto = link.mode === 'auto-name' || link.mode === 'auto-username';
-          const tone = auto
-            ? 'border-emerald-100 bg-emerald-50/60'
-            : link.mode === 'manual'
-              ? 'border-indigo-100 bg-indigo-50/50'
-              : 'border-amber-200 bg-amber-50';
-          const kicker = auto ? 'text-emerald-700' : link.mode === 'manual' ? 'text-indigo-700' : 'text-amber-800';
-          const detail = auto ? 'text-emerald-800' : 'text-indigo-800';
-          const label = link.mode === 'auto-username' || link.mode === 'auto-name'
-            ? 'Otomatis'
-            : link.mode === 'manual'
-              ? 'Manual (localStorage)'
-              : link.mode === 'ambiguous'
-                ? 'Perlu dipetakan manual'
-                : 'Belum terhubung';
-          return (
-            <div key={link.replizId} className={`rounded-xl border px-3 py-2.5 ${tone}`}>
-              <p className={`text-[10px] font-extrabold uppercase tracking-wide ${kicker}`}>{label}</p>
-              <p className="mt-1 text-sm font-bold text-gray-900">
-                {link.name || 'Akun TikTok'}
-                {link.username && <span className="font-semibold text-gray-500"> (@{link.username})</span>}
-              </p>
-              {link.masterId && (
-                <p className={`text-xs font-semibold ${detail}`}>→ {link.masterId} · {link.master?.nama || link.master?.name || link.master?.label}</p>
-              )}
-              {!auto && (
-                <label className="mt-1.5 block">
-                  <span className="sr-only">Petakan {link.name || 'akun'} ke Id_Akun</span>
-                  <select
-                    value={link.mode === 'manual' ? link.masterId : ''}
-                    onChange={(event) => onMap(link.replizId, event.target.value)}
-                    className="w-full rounded-lg border border-amber-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700"
-                  >
-                    <option value="">Pilih Id_Akun…</option>
-                    {masters.map((account) => (
-                      <option key={account.id} value={account.id}>{masterOptionLabel(account)}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-          );
-        })}
-      </div>
+
+      {showAccountMap && (
+        <div className="mt-3 grid grid-cols-1 gap-2 lg:grid-cols-2">
+          {Array.from(links, (link) => {
+            const auto = link.mode === 'auto-name' || link.mode === 'auto-username';
+            const tone = auto
+              ? 'border-emerald-100 bg-emerald-50/60'
+              : link.mode === 'manual'
+                ? 'border-indigo-100 bg-indigo-50/50'
+                : 'border-amber-200 bg-amber-50';
+            const kicker = auto ? 'text-emerald-700' : link.mode === 'manual' ? 'text-indigo-700' : 'text-amber-800';
+            const detail = auto ? 'text-emerald-800' : 'text-indigo-800';
+            const label = link.mode === 'auto-username' || link.mode === 'auto-name'
+              ? 'Otomatis'
+              : link.mode === 'manual'
+                ? 'Manual (localStorage)'
+                : link.mode === 'ambiguous'
+                  ? 'Perlu dipetakan manual'
+                  : 'Belum terhubung';
+            return (
+              <div key={link.replizId} className={`rounded-xl border px-3 py-2.5 ${tone}`}>
+                <p className={`text-[10px] font-extrabold uppercase tracking-wide ${kicker}`}>{label}</p>
+                <p className="mt-1 text-sm font-bold text-gray-900">
+                  {link.name || 'Akun TikTok'}
+                  {link.username && <span className="font-semibold text-gray-500"> (@{link.username})</span>}
+                </p>
+                {link.masterId && (
+                  <p className={`text-xs font-semibold ${detail}`}>→ {link.masterId} · {link.master?.nama || link.master?.name || link.master?.label}</p>
+                )}
+                {!auto && (
+                  <label className="mt-1.5 block">
+                    <span className="sr-only">Petakan {link.name || 'akun'} ke Id_Akun</span>
+                    <select
+                      value={link.mode === 'manual' ? link.masterId : ''}
+                      onChange={(event) => onMap(link.replizId, event.target.value)}
+                      className="w-full rounded-lg border border-amber-200 bg-white px-2 py-1 text-xs font-semibold text-gray-700"
+                    >
+                      <option value="">Pilih Id_Akun…</option>
+                      {Array.from(masters, (account) => (
+                        <option key={account['id']} value={account['id']}>{masterOptionLabel(account)}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
@@ -219,6 +232,7 @@ export default function JadwalReplizPanel({ klipVideos = [], publishVideos = [],
   const [statusBusy, setStatusBusy] = useState(false);
   const [schedulePage, setSchedulePage] = useState(1);
   const [scheduleSort, setScheduleSort] = useState('newest');
+  const [showAccountMap, setShowAccountMap] = useState(false);
   const [scheduleStatus, setScheduleStatus] = useState('');
   const [scheduleMeta, setScheduleMeta] = useState({ totalPages: 1, totalDocs: 0 });
   const [scheduleError, setScheduleError] = useState('');
