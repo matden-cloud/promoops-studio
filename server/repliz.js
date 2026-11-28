@@ -146,7 +146,7 @@ function mapSchedule(row, secrets) {
     accountName: text(row?.account?.name || row?.account?.username),
     accountUsername: text(row?.account?.username),
     fileId: fileIdFromMedia(media?.url),
-    mediaFileName: fileNameFromMedia(media?.url),
+    mediaFileName: text(media?.alt) || fileNameFromMedia(media?.url),
   };
 }
 
@@ -366,7 +366,6 @@ async function createSchedule(request, config, fetchImpl, now, mintImpl) {
 
   // Validasi semua field dulu sebelum transfer video
   const built = buildCreateBody(payload, config, request, typeof now === 'number' ? now : new Date().getTime());
-
   // Salin video dari OneDrive ke Repliz Storage, lalu pakai URL storage.repliz.com
   const storageUrl = await uploadOneDriveToReplizStorage({
     fileId: text(payload?.fileId),
@@ -378,7 +377,7 @@ async function createSchedule(request, config, fetchImpl, now, mintImpl) {
 
   const upstreamBody = {
     ...built.upstream,
-    medias: [{ type: 'video', url: storageUrl }],
+    medias: [{ type: 'video', url: storageUrl, alt: text(payload?.fileName) }],
   };
 
   const response = await callRepliz(fetchImpl, `${REPLIZ_ORIGIN}/public/schedule`, {
