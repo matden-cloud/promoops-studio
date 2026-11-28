@@ -132,9 +132,10 @@ function buildPptx(pptx, report, insights) {
           x: x + 0.15, y: 2.08, w: cardW - 0.3, h: 0.25, fontSize: 8.5, color: MUTED,
         });
       }
-      if (v.dataUri) {
+     if (v.dataUri) {
         slide.addMedia({
           type: 'video',
+          extn: 'mp4',
           data: v.dataUri,
           x: x + 0.25,
           y: 2.38,
@@ -144,13 +145,11 @@ function buildPptx(pptx, report, insights) {
       } else {
         slide.addText(
           v.url
-            ? { text: 'Buka Video ↗', options: { hyperlink: { url: v.url }, color: EMERALD, underline: true } }
-            : 'File tidak ditemukan di OneDrive / >20 MB.',
+            ? [{ text: 'Buka Video ↗', options: { hyperlink: { url: v.url }, color: EMERALD, underline: true } }]
+            : 'File tidak ditemukan di OneDrive / >100 MB.',
           { x: x + 0.25, y: 4.2, w: cardW - 0.5, h: 0.7, fontSize: 11, align: 'center', color: MUTED },
         );
       }
-    }
-  };
 
   // SLIDE 1: Ringkasan bulan ini
   const kpiSlide = pptx.addSlide();
