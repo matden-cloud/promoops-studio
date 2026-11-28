@@ -94,214 +94,247 @@ function bodyCell(text, align = 'center') {
 }
 
 function buildPptx(pptx, report, insights) {
-  pptx.defineLayout({ name: 'LAYOUT_16x9', width: SLIDE_W, height: SLIDE_H });
   pptx.layout = 'LAYOUT_16x9';
   pptx.author = 'PromoOps Studio';
   pptx.title = `Laporan Video ${report.monthLabel || ''}`.trim();
   pptx.theme = { headFontFace: 'Arial', bodyFontFace: 'Arial' };
 
-  const cover = pptx.addSlide();
-  cover.background = { color: EMERALD_DARK };
-  cover.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 0.22, h: SLIDE_H, fill: { color: '34D399' },
-  });
-  cover.addText('LAPORAN VIDEO', {
-    x: 0.75, y: 1.7, w: 11, h: 0.32,
-    fontFace: 'Arial', fontSize: 13, bold: true, color: 'A7F3D0', margin: 0, charSpacing: 1.5,
-  });
-  cover.addText(report.monthLabel || 'Bulan ini', {
-    x: 0.75, y: 2.15, w: 11.5, h: 0.9,
-    fontFace: 'Arial', fontSize: 40, bold: true, color: WHITE, margin: 0,
-  });
-  cover.addText(coverMeta(report), {
-    x: 0.75, y: 3.25, w: 11, h: 0.7,
-    fontFace: 'Arial', fontSize: 16, color: 'D1FAE5', margin: 0,
-  });
-  cover.addText(report.generatedLabel ? `Disusun ${report.generatedLabel}` : 'PromoOps Studio', {
-    x: 0.75, y: 6.5, w: 8, h: 0.3,
-    fontFace: 'Arial', fontSize: 12, color: 'A7F3D0', margin: 0,
-  });
+  const num = (v) => formatIdNumber(Number(v) || 0);
+  const extras = report.extras || {};
 
+  // Helper kartu video (dipakai Slide 3 & Slide 5)
+  const renderVideoCards = (slide, list, emptyText, isFyp = false) => {
+    if (!list || list.length === 0) {
+      slide.addText(emptyText, { x: 0.6, y: 2.0, w: 12, h: 0.6, fontSize: 14, color: MUTED });
+      return;
+    }
+    const count = Math.min(3, list.length);
+    const cardW = 3.75;
+    const gap = 0.44;
+    const startX = (SLIDE_W - (count * cardW + (count - 1) * gap)) / 2;
+    for (let i = 0; i < count; i++) {
+      const v = list[i];
+      const x = startX + i * (cardW + gap);
+      slide.addShape(pptx.ShapeType.roundRect, {
+        x, y: 1.35, w: cardW, h: 5.7, fill: { color: WHITE }, line: { color: LINE, pt: 1 },
+      });
+      const topMeta = isFyp
+        ? `${num(v.view)} view · ${v.akun}`
+        : `${v.produk} · ${v.creator || '-'}`;
+      slide.addText(topMeta, {
+        x: x + 0.15, y: 1.45, w: cardW - 0.3, h: 0.28, fontSize: 10, bold: true, color: EMERALD,
+      });
+      slide.addText(String(v.fileName || 'Video').slice(0, 44), {
+        x: x + 0.15, y: 1.73, w: cardW - 0.3, h: 0.38, fontSize: 9.5, bold: true, color: INK,
+      });
+      if (v.catatan || (isFyp && v.status)) {
+        slide.addText(String(v.catatan || v.status).slice(0, 46), {
+          x: x + 0.15, y: 2.08, w: cardW - 0.3, h: 0.25, fontSize: 8.5, color: MUTED,
+        });
+      }
+      if (v.dataUri) {
+        slide.addMedia({
+          type: 'video',
+          data: v.dataUri,
+          x: x + 0.25,
+          y: 2.38,
+          w: cardW - 0.5,
+          h: 4.5,
+        });
+      } else {
+        slide.addText(
+          v.url
+            ? { text: 'Buka Video ↗', options: { hyperlink: { url: v.url }, color: EMERALD, underline: true } }
+            : 'File tidak ditemukan di OneDrive / >20 MB.',
+          { x: x + 0.25, y: 4.2, w: cardW - 0.5, h: 0.7, fontSize: 11, align: 'center', color: MUTED },
+        );
+      }
+    }
+  };
+
+  // SLIDE 1: Ringkasan bulan ini
   const kpiSlide = pptx.addSlide();
-  addContentChrome(kpiSlide, pptx, 'Ringkasan bulan ini', 'Angka mengikuti bulan, produk, tim, tanggal, dan pencarian yang sedang dipilih.');
-  const cards = [
-    ['Mentahan', num(report.kpi.mentahan)],
-    ['Belum dipakai', num(report.kpi.belumDipakai)],
-    ['Sudah dipakai', num(report.kpi.sudahDipakai)],
-    ['Klip', num(report.kpi.klip)],
-    ['Upload', num(report.kpi.upload)],
-    ['Target', num(report.kpi.target)],
+  addContentChrome(kpiSlide, pptx, `Ringkasan bulan ini — ${report.monthLabel || ''}`, coverMeta(report));
+  const kpi = report.kpi || {};
+  const kpiCards = [
+    ['Mentahan', num(kpi.mentahan)],
+    ['Belum dipakai', num(kpi.belumDipakai)],
+    ['Sudah dipakai', num(kpi.sudahDipakai)],
+    ['Klip', num(kpi.klip)],
+    ['Upload', num(kpi.upload)],
+    ['Target', num(kpi.target)],
   ];
-  cards.forEach((card, index) => {
-    const column = index % 3;
-    const row = Math.floor(index / 3);
-    const x = 0.48 + column * 4.2;
-    const y = 1.25 + row * 1.85;
+  for (let i = 0; i < kpiCards.length; i++) {
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const x = 0.6 + col * 4.12;
+    const y = 1.45 + row * 1.95;
     kpiSlide.addShape(pptx.ShapeType.roundRect, {
-      x, y, w: 3.95, h: 1.65,
-      fill: { color: WHITE },
-      rectRadius: 0.1,
-      shadow: { type: 'outer', color: '064E3B', opacity: 0.08, blur: 8, offset: 2 },
+      x, y, w: 3.88, h: 1.65, fill: { color: WHITE }, line: { color: LINE, pt: 1 },
     });
-    kpiSlide.addText(card[0], {
-      x: x + 0.22, y: y + 0.22, w: 3.5, h: 0.32,
-      fontFace: 'Arial', fontSize: 13, color: MUTED, margin: 0,
-    });
-    kpiSlide.addText(card[1], {
-      x: x + 0.22, y: y + 0.62, w: 3.5, h: 0.7,
-      fontFace: 'Arial', fontSize: 32, bold: true, color: EMERALD_DARK, margin: 0,
-    });
-  });
-  const ratio = report.kpi.ratio == null ? '' : ` (${report.kpi.ratio}%)`;
-  const viewLine = report.kpi.viewSum
-    ? `View ${num(report.kpi.viewSum)}, rata-rata ${num(report.kpi.avgView)}.`
-    : 'Data view bulan ini belum masuk.';
-  kpiSlide.addText(`Upload ${num(report.kpi.upload)} dari target rencana ${num(report.kpi.target)}${ratio}. Rencana ${report.kpi.dailyTarget} video/hari × ${report.kpi.elapsedDays} hari. ${viewLine}`, {
-    x: 0.48, y: 5.15, w: 12.3, h: 0.7,
-    fontFace: 'Arial', fontSize: 14, color: INK, margin: 0,
-  });
+    kpiSlide.addText(kpiCards[i][0], { x: x + 0.22, y: y + 0.2, w: 3.4, h: 0.35, fontSize: 12, color: MUTED });
+    kpiSlide.addText(kpiCards[i][1], { x: x + 0.22, y: y + 0.65, w: 3.4, h: 0.7, fontSize: 32, bold: true, color: EMERALD_DARK });
+  }
+  const ratio = kpi.target > 0 ? Math.round((kpi.upload / kpi.target) * 100) : 0;
+  kpiSlide.addText(
+    `Upload ${num(kpi.upload)} dari target rencana ${num(kpi.target)} (${ratio}%). View ${num(kpi.totalView)}, rata-rata ${num(kpi.avgView)}.`,
+    { x: 0.6, y: 5.65, w: 12.1, h: 0.5, fontSize: 12, color: INK },
+  );
 
-  const chartSlide = pptx.addSlide();
-  addContentChrome(chartSlide, pptx, 'Power bulanan', 'Mentahan, produksi editor, dan publish. Grafik memakai semua bulan pada filter produk, tim, dan pencarian.');
-  const series = report.series || [];
-  if (series.length) {
-    chartSlide.addChart(pptx.ChartType.bar, [
-      { name: 'Mentahan', labels: series.map((item) => item.label), values: series.map((item) => item.mentahan) },
-      { name: 'Produksi', labels: series.map((item) => item.label), values: series.map((item) => item.produksi) },
-      { name: 'Publish', labels: series.map((item) => item.label), values: series.map((item) => item.publish) },
-    ], {
-      x: 0.4, y: 1.15, w: 12.5, h: 5.7,
-      barDir: 'col',
-      barGrouping: 'clustered',
-      showLegend: true,
-      legendPos: 'b',
-      chartColors: ['059669', '0F766E', '111827'],
-      showValue: false,
-      showTitle: false,
-      valAxisMinVal: 0,
-      catAxisLabelColor: '374151',
-      valAxisLabelColor: '374151',
-      catAxisLabelFontSize: 11,
-      valAxisLabelFontSize: 11,
-      chartDataBorder: { pt: 0, color: WHITE },
+  // SLIDE 2: Mentahan Paling Banyak
+  const rawTopSlide = pptx.addSlide();
+  addContentChrome(rawTopSlide, pptx, 'Mentahan Paling Banyak', `Daftar produk dengan jumlah mentahan terbanyak pada ${report.monthLabel || 'periode ini'}.`);
+  const topRaw = extras.mentahanTerbanyak || [];
+  if (topRaw.length) {
+    const tRaw = [[headerCell('No'), headerCell('Produk'), headerCell('Total Mentahan'), headerCell('Belum Dipakai'), headerCell('Sudah Dipakai')]];
+    for (let i = 0; i < topRaw.length; i++) {
+      tRaw.push([
+        bodyCell(String(i + 1), 'center'),
+        bodyCell(topRaw[i].produk, 'left'),
+        bodyCell(num(topRaw[i].total), 'center'),
+        bodyCell(num(topRaw[i].belum), 'center'),
+        bodyCell(num(topRaw[i].sudah), 'center'),
+      ]);
+    }
+    rawTopSlide.addTable(tRaw, {
+      x: 0.6, y: 1.45, w: 12.13, colW: [0.8, 5.53, 1.9, 1.95, 1.95],
+      border: { type: 'solid', color: LINE, pt: 0.5 }, fontSize: 10.5, rowH: 0.48,
     });
   } else {
-    chartSlide.addText('Belum ada data bulanan pada filter ini.', {
-      x: 0.5, y: 2.4, w: 12, h: 0.4, fontFace: 'Arial', fontSize: 16, color: MUTED,
-    });
+    rawTopSlide.addText('Belum ada data mentahan pada bulan ini.', { x: 0.6, y: 2.0, w: 12, h: 0.5, fontSize: 13, color: MUTED });
   }
 
-  const productSlide = pptx.addSlide();
-  addContentChrome(
-    productSlide,
-    pptx,
-    'Produk menurut upload',
-    report.productTotal > (report.products || []).length
-      ? `${report.products.length} produk teratas dari ${report.productTotal}.`
-      : 'Mentahan, edit, upload, total view, dan rata-rata view.',
-  );
-  const productRows = (report.products || []).length
-    ? (report.products || []).map((item) => ([
-      bodyCell(clip(item.name, 42), 'left'),
-      bodyCell(num(item.raw)),
-      bodyCell(num(item.edit)),
-      bodyCell(num(item.upload)),
-      bodyCell(num(item.viewSum)),
-      bodyCell(num(item.avgView)),
-    ]))
-    : [[bodyCell('Belum ada produk pada cakupan ini.', 'left'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-')]];
-  productSlide.addTable([
-    ['Produk', 'Mentahan', 'Edit', 'Upload', 'Total view', 'Rata view'].map(headerCell),
-    ...productRows,
-  ], {
-    x: 0.45, y: 1.2, w: 12.4,
-    colW: [4.2, 1.5, 1.4, 1.5, 1.9, 1.9],
-    border: [
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-    ],
-    fontFace: 'Arial',
-    fontSize: 12,
-    color: INK,
-    valign: 'middle',
-    fill: { color: WHITE },
-  });
+  // SLIDE 3: Mentahan Paling Bagus (Ditandai Bintang & Bisa Diputar)
+  const rawStarSlide = pptx.addSlide();
+  addContentChrome(rawStarSlide, pptx, 'Mentahan Paling Bagus (Berbintang)', 'File mentahan yang ditandai bintang — klik putar langsung di PowerPoint.');
+  renderVideoCards(rawStarSlide, extras.mentahanBagusVideos || [], 'Belum ada file mentahan yang ditandai bintang pada bulan ini.', false);
 
-  const videoSlide = pptx.addSlide();
-  addContentChrome(videoSlide, pptx, 'Video view tertinggi', 'Sumber Data_View pada bulan laporan.');
-  const videoRows = (report.videos || []).map((item) => ([
-    bodyCell(item.date || '-', 'left'),
-    bodyCell(clip(item.akun, 22), 'left'),
-    bodyCell(clip(item.produk, 28), 'left'),
-    bodyCell(num(item.view)),
-    bodyCell(item.fyp || '-'),
-  ]));
-  if (!videoRows.length) {
-    videoSlide.addText('Belum ada data view pada bulan ini.', {
-      x: 0.55, y: 1.5, w: 10, h: 0.4,
-      fontFace: 'Arial', fontSize: 16, color: MUTED, margin: 0,
+  // SLIDE 4: Jumlah Publish & Upload via Repliz (Gabungan 1 Slide)
+  const pubSlide = pptx.addSlide();
+  addContentChrome(pubSlide, pptx, 'Jumlah Publish & Upload via Repliz', 'Perbandingan total publish akun dengan status upload otomatis Repliz.');
+  const rz = extras.repliz || { total: 0, success: 0, pending: 0, error: 0, rows: [] };
+  const pubCards = [
+    ['Total Publish', num(kpi.upload)],
+    ['Target Publish', num(kpi.target)],
+    ['Repliz Berhasil', num(rz.success)],
+    ['Repliz Menunggu / Gagal', `${num(rz.pending)} / ${num(rz.error)}`],
+  ];
+  for (let c = 0; c < pubCards.length; c++) {
+    const x = 0.6 + c * 3.08;
+    pubSlide.addShape(pptx.ShapeType.roundRect, {
+      x, y: 1.35, w: 2.88, h: 1.0, fill: { color: WHITE }, line: { color: LINE, pt: 1 },
+    });
+    pubSlide.addText(pubCards[c][0], { x: x + 0.16, y: 1.45, w: 2.55, h: 0.28, fontSize: 10.5, color: MUTED });
+    pubSlide.addText(pubCards[c][1], { x: x + 0.16, y: 1.75, w: 2.55, h: 0.45, fontSize: 22, bold: true, color: EMERALD_DARK });
+  }
+  const akunRows = (report.accountTargets || []).slice(0, 6);
+  pubSlide.addText('Publish per Akun vs Target', { x: 0.6, y: 2.55, w: 5.8, h: 0.3, fontSize: 12, bold: true, color: EMERALD_DARK });
+  if (akunRows.length) {
+    const tAkun = [[headerCell('Akun'), headerCell('Upload'), headerCell('Target'), headerCell('Persen')]];
+    for (const a of akunRows) {
+      tAkun.push([
+        bodyCell(a.label || a.akun || '-', 'left'),
+        bodyCell(num(a.upload), 'center'),
+        bodyCell(num(a.target), 'center'),
+        bodyCell(`${Math.round(Number(a.percent || a.persen) || 0)}%`, 'center'),
+      ]);
+    }
+    pubSlide.addTable(tAkun, {
+      x: 0.6, y: 2.9, w: 5.85, colW: [2.75, 1.0, 1.0, 1.1],
+      border: { type: 'solid', color: LINE, pt: 0.5 }, fontSize: 9.5, rowH: 0.52,
     });
   }
-  if (videoRows.length) videoSlide.addTable([
-    ['Tanggal', 'Akun', 'Produk', 'View', 'Status'].map(headerCell),
-    ...videoRows,
-  ], {
-    x: 0.45, y: 1.2, w: 12.4,
-    colW: [1.8, 2.8, 3.6, 1.8, 2.4],
-    border: [
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-    ],
-    fontFace: 'Arial',
-    fontSize: 12,
-    valign: 'middle',
-    fill: { color: WHITE },
-  });
+  pubSlide.addText('Upload Terbaru via Repliz', { x: 6.7, y: 2.55, w: 6.0, h: 0.3, fontSize: 12, bold: true, color: EMERALD_DARK });
+  if (rz.rows && rz.rows.length) {
+    const tRz = [[headerCell('Jadwal'), headerCell('File / Caption'), headerCell('Status')]];
+    for (const r of rz.rows.slice(0, 5)) {
+      tRz.push([
+        bodyCell(String(r.scheduleAt || '-').slice(5, 16).replace('T', ' '), 'left'),
+        bodyCell(String(r.mediaFileName || r.description || '-').slice(0, 38), 'left'),
+        bodyCell(String(r.status || '-').toUpperCase(), 'center'),
+      ]);
+    }
+    pubSlide.addTable(tRz, {
+      x: 6.7, y: 2.9, w: 6.03, colW: [1.55, 3.28, 1.2],
+      border: { type: 'solid', color: LINE, pt: 0.5 }, fontSize: 9.5, rowH: 0.52,
+    });
+  } else {
+    pubSlide.addText('Belum ada data jadwal Repliz.', { x: 6.7, y: 3.0, w: 6.0, h: 0.4, fontSize: 11, color: MUTED });
+  }
 
-  const akunSlide = pptx.addSlide();
-  addContentChrome(akunSlide, pptx, 'Upload akun dibanding target', `${report.plan?.caption || 'Target akun'}. Target periode = kuota harian × ${report.plan?.elapsedDays || 0} hari.`);
-  const akunRows = (report.accounts || []).length
-    ? report.accounts.map((item) => ([
-      bodyCell(clip(item.nama, 28), 'left'),
-      bodyCell(num(item.perDay)),
-      bodyCell(num(item.upload)),
-      bodyCell(num(item.target)),
-      bodyCell(item.gap > 0 ? `+${num(item.gap)}` : num(item.gap)),
-      bodyCell(item.ratio == null ? '-' : `${item.ratio}%`),
-    ]))
-    : [[bodyCell('Belum ada akun pada rencana.', 'left'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-'), bodyCell('-')]];
-  akunSlide.addTable([
-    ['Akun', 'Kuota/hari', 'Upload', 'Target', 'Selisih', 'Persen'].map(headerCell),
-    ...akunRows,
-  ], {
-    x: 0.45, y: 1.2, w: 12.4,
-    colW: [3.6, 1.8, 1.7, 1.7, 1.8, 1.8],
-    border: [
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-      { pt: 0.5, color: LINE },
-    ],
-    fontFace: 'Arial',
-    fontSize: 13,
-    valign: 'middle',
-    fill: { color: WHITE },
-  });
+  // SLIDE 5: Video FYP Berbintang (Bisa Diputar)
+  const fypSlide = pptx.addSlide();
+  addContentChrome(fypSlide, pptx, 'Video FYP Pilihan (Berbintang)', 'Video FYP berbintang / view tertinggi — klik putar langsung di PowerPoint.');
+  renderVideoCards(fypSlide, extras.fypBagusVideos || [], 'Belum ada video FYP pada bulan ini.', true);
 
-  const insightSlide = pptx.addSlide();
-  addContentChrome(insightSlide, pptx, 'Insight & Rekomendasi', 'Disusun dari angka laporan. Jika asisten tidak menjawab, teks ini ringkasan lokal.');
-  const bullets = (insights || []).slice(0, 6);
-  insightSlide.addText(bullets.length ? bullets.map((line) => ({
-    text: line,
-    options: { bullet: { code: '25A0' }, breakLine: true },
-  })) : [{ text: 'Belum ada insight.', options: { bullet: false } }], {
-    x: 0.55, y: 1.25, w: 12.2, h: 5.5,
-    fontFace: 'Arial', fontSize: 16, color: INK, paraSpaceAfter: 12, valign: 'top',
-  });
+  // SLIDE 6: Evaluasi Pelanggaran
+  const violSlide = pptx.addSlide();
+  const vl = extras.violations || { total: 0, rows: [] };
+  addContentChrome(violSlide, pptx, 'Evaluasi Pelanggaran', `Total tercatat: ${num(vl.total)} kasus pelanggaran.`);
+  if (vl.rows && vl.rows.length) {
+    const vTable = [[headerCell('Tanggal'), headerCell('Akun'), headerCell('Produk'), headerCell('Jenis'), headerCell('Penyebab & Sanksi'), headerCell('Status')]];
+    for (const v of vl.rows) {
+      const detail = [v.penyebab, v.sanksi].filter(Boolean).join(' · ') || v.catatan || '-';
+      vTable.push([
+        bodyCell(String(v.tanggal || '-'), 'left'),
+        bodyCell(String(v.akun || '-'), 'left'),
+        bodyCell(String(v.produk || '-'), 'left'),
+        bodyCell(String(v.jenis || '-'), 'left'),
+        bodyCell(String(detail).slice(0, 70), 'left'),
+        bodyCell(String(v.status || '-'), 'center'),
+      ]);
+    }
+    violSlide.addTable(vTable, {
+      x: 0.6, y: 1.45, w: 12.13, colW: [1.4, 1.8, 2.0, 2.0, 3.33, 1.6],
+      border: { type: 'solid', color: LINE, pt: 0.5 }, fontSize: 9.5, rowH: 0.65,
+    });
+  } else {
+    violSlide.addText('Tidak ada catatan pelanggaran pada periode ini.', { x: 0.6, y: 2.0, w: 12, h: 0.5, fontSize: 14, color: EMERALD });
+  }
+
+  // SLIDE 7 (Terakhir): Power Pembuatan Video & Upload (Bulan ke Bulan + Rata-rata)
+  const powerSlide = pptx.addSlide();
+  addContentChrome(powerSlide, pptx, 'Power Pembuatan & Upload Video (Bulan ke Bulan)', 'Rata-rata kapasitas produksi & upload tim dari bulan aktif.');
+  const pw = extras.power || { rows: [], avgMentahan: 0, avgProduksi: 0, avgPublish: 0, activeProdMonths: 0, activePubMonths: 0 };
+  const pwCards = [
+    ['Rata-rata Mentahan / Bln', num(pw.avgMentahan), `~${num(Math.round(pw.avgMentahan / 30))} / hari`],
+    ['Rata-rata Pembuatan Video / Bln', num(pw.avgProduksi), `Dari ${pw.activeProdMonths} bln aktif (~${num(Math.round(pw.avgProduksi / 30))}/hr)`],
+    ['Rata-rata Upload Video / Bln', num(pw.avgPublish), `Dari ${pw.activePubMonths} bln aktif (~${num(Math.round(pw.avgPublish / 30))}/hr)`],
+  ];
+  for (let c = 0; c < pwCards.length; c++) {
+    const x = 0.6 + c * 4.12;
+    powerSlide.addShape(pptx.ShapeType.roundRect, {
+      x, y: 1.35, w: 3.88, h: 1.25, fill: { color: WHITE }, line: { color: LINE, pt: 1 },
+    });
+    powerSlide.addText(pwCards[c][0], { x: x + 0.18, y: 1.45, w: 3.5, h: 0.28, fontSize: 10.5, color: MUTED });
+    powerSlide.addText(pwCards[c][1], { x: x + 0.18, y: 1.75, w: 3.5, h: 0.45, fontSize: 26, bold: true, color: EMERALD_DARK });
+    powerSlide.addText(pwCards[c][2], { x: x + 0.18, y: 2.25, w: 3.5, h: 0.25, fontSize: 9.5, color: EMERALD });
+  }
+
+  if (pw.rows && pw.rows.length) {
+    const tPw = [[headerCell('Bulan'), headerCell('Mentahan'), headerCell('Pembuatan Video (Edit)'), headerCell('Upload Video (Publish)')]];
+    for (const m of pw.rows) {
+      tPw.push([
+        bodyCell(m.label, 'left'),
+        bodyCell(num(m.mentahan), 'center'),
+        bodyCell(num(m.produksi), 'center'),
+        bodyCell(num(m.publish), 'center'),
+      ]);
+    }
+    tPw.push([
+      headerCell('RATA-RATA POWER / BULAN'),
+      headerCell(num(pw.avgMentahan)),
+      headerCell(num(pw.avgProduksi)),
+      headerCell(num(pw.avgPublish)),
+    ]);
+    powerSlide.addTable(tPw, {
+      x: 0.6, y: 2.8, w: 12.13, colW: [4.03, 2.7, 2.7, 2.7],
+      border: { type: 'solid', color: LINE, pt: 0.5 }, fontSize: 10, rowH: 0.44,
+    });
+  } else {
+    powerSlide.addText('Belum ada data bulanan yang tersedia.', { x: 0.6, y: 2.9, w: 12, h: 0.5, fontSize: 13, color: MUTED });
+  }
+
   return pptx;
 }
 
